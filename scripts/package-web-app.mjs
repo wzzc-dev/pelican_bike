@@ -12,6 +12,10 @@
  *     it as a sibling of its HTML file
  *   - Promotes the package index.html to <out>/index.html so the site entry point
  *     is served from the repo root
+ *   - Copies the browser runtime assets (moui_web_renderer/runtime.js and its
+ *     moui browser runtime dependency) so the site is self-contained
+ *   - Rewrites the promoted index.html so it loads ./web_wasm.wasm and
+ *     ./moui_web_renderer/runtime.js instead of local dev paths
  *   - Creates .br siblings where brotli is available
  *   - Writes <out>/bundle-size.json
  *
@@ -27,7 +31,7 @@
  * Those remain TODO until the corresponding scripts/action exist.
  */
 
-import { mkdir, readdir, stat, copyFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, stat, copyFile, rm, readFile, writeFile } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -68,8 +72,26 @@ for (let i = 1; i < args.length; i++) {
   }
 }
 
+const mooncakesDir = join(projectRoot, '.mooncakes');
 const wasmBuildDir = join(projectRoot, `_build/${target}/debug/build/web_wasm`);
 const wasmFile = join(wasmBuildDir, 'web_wasm.wasm');
+
+// Browser runtime modules imported by the page at runtime. They live in the
+// mooncakes checkout during development, so the packaged site must carry copies.
+const runtimeAssets = [
+  {
+    src: join(mooncakesDir, 'wzzc-dev/moui_web_renderer/runtime.js'),
+    dest: join(outDir, 'moui_web_renderer/runtime.js'),
+  },
+  {
+    src: join(mooncakesDir, 'wzzc-dev/moui_web_renderer/canvas2d_runtime.js'),
+    dest: join(outDir, 'moui_web_renderer/canvas2d_runtime.js'),
+  },
+  {
+    src: join(mooncakesDir, 'wzzc-dev/moui/backend/web/browser_runtime.js'),
+    dest: join(outDir, 'moui/backend/web/browser_runtime.js'),
+  },
+];
 
 async function ensureDir(dir) {
   await mkdir(dir, { recursive: true });
@@ -115,6 +137,18 @@ async function fileSizeBytes(filePath) {
 async function moveFile(src, dest) {
   await ensureDir(dest);
   await copyFile(src, dest);
+}
+
+async function copyAsset({ src, dest }) {
+  const exists = await stat(src).then(s => s.isFile()).catch(() => false);
+  if (!exists) {
+    console.error(`runtime asset not found: ${src}`);
+    console.error('Run `moon build --target wasm-gc ./web_wasm` first so deps are resolved.');
+    process.exit(3);
+  }
+  await mkdir(dirname(dest), { recursive: true });
+  await copyFile(src, dest);
+  console.log(`  copied ${dest}`);
 }
 
 console.log(`packaging web_wasm`);
@@ -169,14 +203,29 @@ if (await stat(topWasm).then(s => s.isFile()).catch(() => false)) {
     console.log(`  wrote ${br}`);
   }
 }
+// Copy the runtime JS the page imports, then promote a rewritten index.html to
+// the output root so the entry point is served from the site root and resolves
+// ./web_wasm.wasm and ./moui_web_renderer/runtime.js.
+for (const asset of runtimeAssets) {
+  await copyAsset(asset);
+}
+
 if (await stat(htmlFile).then(s => s.isFile()).catch(() => false)) {
-  const br = htmlFile + '.br';
-  if (await compressBrotli(htmlFile, br)) {
-    console.log(`  wrote ${br}`);
-  }// Promote the package index.html to the output root so the site entry point
-// is served from the repo root rather than web_wasm/index.html.
-  // Move first, then compress the promoted copy if brotli is available.
-  await copyFile(htmlFile, topHtmlFile);
+  const sourceHtml = await readFile(htmlFile, 'utf8');
+  const runtimeImport = /from\s+"[^"]*moui_web_renderer\/runtime\.js"/;
+  const wasmUrl = /new URL\(\s*"[^"]*web_wasm\.wasm"\s*,\s*import\.meta\.url\s*,?\s*\)/;
+
+  if (!runtimeImport.test(sourceHtml) || !wasmUrl.test(sourceHtml)) {
+    console.error(`could not rewrite asset paths in ${htmlFile}`);
+    console.error('Expected a moui_web_renderer/runtime.js import and a web_wasm.wasm URL.');
+    process.exit(4);
+  }
+
+  const siteHtml = sourceHtml
+    .replace(runtimeImport, 'from "./moui_web_renderer/runtime.js"')
+    .replace(wasmUrl, 'new URL("./web_wasm.wasm", import.meta.url)');
+
+  await writeFile(topHtmlFile, siteHtml);
   try {
     await rm(join(pkgOut, 'index.html'));
   } catch {}
