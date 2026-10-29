@@ -1,0 +1,23 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "examples/pelican_bike/app"
+
+import {
+  "wzzc-dev/moui/core",
+}
+
+// Values
+pub fn program() -> @core.Program[Model, Unit]
+
+pub fn view(Model) -> @core.View[Unit]
+
+// Errors
+
+// Types and methods
+pub struct Model {
+  speed : Double
+}
+pub fn Model::new() -> Self
+
+// Type aliases
+
+// Traits
