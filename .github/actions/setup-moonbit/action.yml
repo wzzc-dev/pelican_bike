@@ -1,0 +1,60 @@
+name: Set up MoonBit
+description: Install the MoonBit toolchain on the runner and add it to PATH.
+inputs:
+  version:
+    description: Optional MoonBit version to install. Defaults to the latest stable.
+    required: false
+runs:
+  using: composite
+  steps:
+    - name: Install MoonBit
+      shell: bash
+      env:
+        MOON_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+
+        if command -v moon >/dev/null 2>&1; then
+          echo "moon already available: $(moon version --all)"
+          exit 0
+        fi
+
+        OS="$(uname -s)"
+        ARCH="$(uname -m)"
+
+        case "$OS" in
+          Linux)
+            case "$ARCH" in
+              x86_64)  PLATFORM="linux-x86_64" ;;
+              aarch64) PLATFORM="linux-aarch64" ;;
+              *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+            esac
+            ;;
+          Darwin)
+            case "$ARCH" in
+              arm64)  PLATFORM="macos-arm64" ;;
+              x86_64) PLATFORM="macos-x86_64" ;;
+              *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+            esac
+            ;;
+          *)
+            echo "unsupported os: $OS" >&2
+            exit 1
+            ;;
+        esac
+
+        INSTALL_DIR="${HOME}/.moon"
+        mkdir -p "$INSTALL_DIR"
+
+        if [ -n "$MOON_VERSION" ]; then
+          echo "installing MoonBit $MOON_VERSION for $PLATFORM"
+          curl -fsSL "https://mooncakes.io/moonbin/release/moon-${MOON_VERSION}-${PLATFORM}.tar.gz" \
+            | tar -xz -C "$INSTALL_DIR" --strip-components=1
+        else
+          echo "installing latest MoonBit for $PLATFORM"
+          curl -fsSL "https://mooncakes.io/moonbin/release/latest-${PLATFORM}.tar.gz" \
+            | tar -xz -C "$INSTALL_DIR" --strip-components=1
+        fi
+
+        echo "$INSTALL_DIR" >> "$GITHUB_PATH"
+        echo "moon $(moon version --all)"
