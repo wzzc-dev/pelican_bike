@@ -35,6 +35,9 @@ jobs:
       - name: Build MoonBit web app
         run: |
           moon version --all
+          # The installer ships a registry snapshot; refresh it so freshly
+          # published dependencies (wzzc-dev/moui et al.) resolve.
+          moon update
           moon build --target wasm-gc ./web_wasm
 
       - name: Package web app
