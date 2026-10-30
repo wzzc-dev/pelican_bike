@@ -5,7 +5,9 @@
  * Package a MoonBit web app (web_wasm) for GitHub Pages.
  *
  * By default this packages the pelican_bike web_wasm app:
- *   - Ensures the wasm-gc build exists under _build/wasm-gc/debug/build/web_wasm/
+ *   - Ensures the optimized wasm-gc build exists under
+ *     _build/wasm-gc/release/build/web_wasm/ (debug builds are ~2.7x larger and
+ *     noticeably slower, so the site always ships the release artifact)
  *   - Copies the web_wasm source tree (index.html, abi.mbt, main.mbt, moon.pkg)
  *     into <out>/web_wasm/
  *   - Copies the built web_wasm.wasm to <out>/web_wasm.wasm so the page can load
@@ -32,7 +34,8 @@
  */
 
 import { mkdir, readdir, stat, copyFile, rm, readFile, writeFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join, dirname, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
 
@@ -73,22 +76,72 @@ for (let i = 1; i < args.length; i++) {
 }
 
 const mooncakesDir = join(projectRoot, '.mooncakes');
-const wasmBuildDir = join(projectRoot, `_build/${target}/debug/build/web_wasm`);
-const wasmFile = join(wasmBuildDir, 'web_wasm.wasm');
+
+// A workspace build (moon.work) writes _build/<target>/release/build/<module>/
+// web_wasm/, a standalone build writes _build/<target>/release/build/web_wasm/.
+// Both can be on disk at once, so pick the newest artifact instead of the first
+// path that exists -- the other one is stale.
+async function newest(paths) {
+  let best = null;
+  for (const path of paths) {
+    const s = await stat(path).catch(() => null);
+    if (s?.isFile() && (!best || s.mtimeMs > best.mtimeMs)) {
+      best = { path, mtimeMs: s.mtimeMs };
+    }
+  }
+  return best?.path ?? null;
+}
+
+function moduleName() {
+  for (const manifest of ['moon.mod', 'moon.mod.json']) {
+    const text = readFileSync(join(projectRoot, manifest), 'utf8');
+    const name = text.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1];
+    if (name) return name;
+  }
+  return null;
+}
+
+const releaseBuildDir = join(projectRoot, `_build/${target}/release/build`);
+const wasmFile = await newest([
+  join(releaseBuildDir, 'web_wasm/web_wasm.wasm'),
+  ...(moduleName()
+    ? [join(releaseBuildDir, `${moduleName()}/web_wasm/web_wasm.wasm`)]
+    : []),
+]);
+const wasmBuildDir = wasmFile ? dirname(wasmFile) : join(releaseBuildDir, 'web_wasm');
 
 // Browser runtime modules imported by the page at runtime. They live in the
-// mooncakes checkout during development, so the packaged site must carry copies.
+// mooncakes checkout, or in the vendored workspace member when moon.work
+// overrides the module, so the packaged site must carry a copy of whichever one
+// was actually compiled.
+function workspaceMember(name) {
+  const text = readFileSync(join(projectRoot, 'moon.work'), 'utf8');
+  const block = text.match(/members\s*=\s*\[([^\]]*)\]/)?.[1] ?? '';
+  for (const quoted of block.match(/"[^"]+"/g) ?? []) {
+    const dir = resolve(projectRoot, quoted.slice(1, -1));
+    if (basename(dir) === name) return dir;
+  }
+  return null;
+}
+
+function depFile(name, relativePath) {
+  const member = workspaceMember(name);
+  return member
+    ? join(member, relativePath)
+    : join(mooncakesDir, 'wzzc-dev', name, relativePath);
+}
+
 const runtimeAssets = [
   {
-    src: join(mooncakesDir, 'wzzc-dev/moui_web_renderer/runtime.js'),
+    src: depFile('moui_web_renderer', 'runtime.js'),
     dest: join(outDir, 'moui_web_renderer/runtime.js'),
   },
   {
-    src: join(mooncakesDir, 'wzzc-dev/moui_web_renderer/canvas2d_runtime.js'),
+    src: depFile('moui_web_renderer', 'canvas2d_runtime.js'),
     dest: join(outDir, 'moui_web_renderer/canvas2d_runtime.js'),
   },
   {
-    src: join(mooncakesDir, 'wzzc-dev/moui/backend/web/browser_runtime.js'),
+    src: depFile('moui', 'backend/web/browser_runtime.js'),
     dest: join(outDir, 'moui/backend/web/browser_runtime.js'),
   },
 ];
@@ -143,7 +196,7 @@ async function copyAsset({ src, dest }) {
   const exists = await stat(src).then(s => s.isFile()).catch(() => false);
   if (!exists) {
     console.error(`runtime asset not found: ${src}`);
-    console.error('Run `moon build --target wasm-gc ./web_wasm` first so deps are resolved.');
+    console.error('Run `moon build --target wasm-gc --release ./web_wasm` first so deps are resolved.');
     process.exit(3);
   }
   await mkdir(dirname(dest), { recursive: true });
@@ -176,11 +229,11 @@ try {
   await rm(pkgOut, { recursive: true, force: true });
 } catch {}
 
-if (!(await stat(wasmFile).then(s => s.isFile()).catch(() => false))) {
-  console.error(`built wasm not found: ${wasmFile}`);
-  console.error('Expected moon build output at:');
-  console.error(`  ${wasmFile}`);
-  console.error('Run: moon build --target wasm-gc ./web_wasm');
+if (!wasmFile) {
+  console.error('built wasm not found under either expected output dir:');
+  console.error(`  ${join(releaseBuildDir, 'web_wasm')}`);
+  console.error(`  ${join(releaseBuildDir, moduleName() ?? '<module>', 'web_wasm')}`);
+  console.error('Run: moon build --target wasm-gc --release ./web_wasm');
   process.exit(2);
 }
 

@@ -38,7 +38,9 @@ jobs:
           # The installer ships a registry snapshot; refresh it so freshly
           # published dependencies (wzzc-dev/moui et al.) resolve.
           moon update
-          moon build --target wasm-gc ./web_wasm
+          # Ship the optimized artifact: debug wasm-gc is ~2.7x larger and the
+          # per-frame painting cost is visibly higher in the browser.
+          moon build --target wasm-gc --release ./web_wasm
 
       - name: Package web app
         run: |

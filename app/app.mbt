@@ -13,6 +13,7 @@ using @views {
   push_clip,
   push_opacity,
   push_transform,
+  stroke_rounded_rect,
 }
 
 ///|
@@ -186,8 +187,43 @@ fn rotate_around(
 }
 
 ///|
-/// Four cubic segments approximating an ellipse; rotation is baked into the
-/// vertices so a single PathSpec can be filled, stroked, or both.
+/// Filled rounded quad. A radius of half the short side makes this a circle, so
+/// arcs are drawn without tessellating a path: the browser renderer copies every
+/// path to JavaScript one character at a time, which costs about as much for a
+/// dot as for a wheel once the path is flattened into triangles.
+fn fill_rounded(
+  ctx : @views.PaintContext,
+  area : @geometry.Rect,
+  radius : Double,
+  fill : @graphics.Color,
+) -> Unit {
+  fill_rounded_rect(
+    ctx,
+    @graphics.RoundedRect::new(rect=area, radius~),
+    @graphics.Brush::solid(fill),
+  )
+}
+
+///|
+fn stroke_rounded(
+  ctx : @views.PaintContext,
+  area : @geometry.Rect,
+  radius : Double,
+  stroke : @graphics.Color,
+  width : Double,
+) -> Unit {
+  stroke_rounded_rect(
+    ctx,
+    @graphics.RoundedRect::new(rect=area, radius~),
+    @graphics.Brush::solid(stroke),
+    width,
+  )
+}
+
+///|
+/// Ellipse outline as polygon chords, used where a scaled quad would distort the
+/// edge (very flat ellipses) or where the edge width matters. The chord count
+/// follows the radius, so small shapes stay cheap.
 fn ellipse_verbs(
   cx : Double,
   cy : Double,
@@ -195,27 +231,107 @@ fn ellipse_verbs(
   ry : Double,
   rotation : Double,
 ) -> Array[@graphics.PathVerb] {
-  let k = 0.5522847498307936
-  let right = rotate_around(cx + rx, cy, cx, cy, rotation)
-  let bottom = rotate_around(cx, cy + ry, cx, cy, rotation)
-  let left = rotate_around(cx - rx, cy, cx, cy, rotation)
-  let top = rotate_around(cx, cy - ry, cx, cy, rotation)
-  let rb1 = rotate_around(cx + rx, cy + ry * k, cx, cy, rotation)
-  let rb2 = rotate_around(cx + rx * k, cy + ry, cx, cy, rotation)
-  let bl1 = rotate_around(cx - rx * k, cy + ry, cx, cy, rotation)
-  let bl2 = rotate_around(cx - rx, cy + ry * k, cx, cy, rotation)
-  let lt1 = rotate_around(cx - rx, cy - ry * k, cx, cy, rotation)
-  let lt2 = rotate_around(cx - rx * k, cy - ry, cx, cy, rotation)
-  let tr1 = rotate_around(cx + rx * k, cy - ry, cx, cy, rotation)
-  let tr2 = rotate_around(cx + rx, cy - ry * k, cx, cy, rotation)
-  [
-    MoveTo(right),
-    CubicTo(rb1, rb2, bottom),
-    CubicTo(bl1, bl2, left),
-    CubicTo(lt1, lt2, top),
-    CubicTo(tr1, tr2, right),
-    Close,
-  ]
+  let long = rx.max(ry)
+  let raw = (long * 0.7).to_int()
+  let segments = if raw < 12 {
+    12
+  } else if raw > 48 {
+    48
+  } else {
+    raw
+  }
+  let verbs : Array[@graphics.PathVerb] = []
+  let mut index = 0
+  while index < segments {
+    let angle = index.to_double() / segments.to_double() * 6.283185307179586
+    let point = rotate_around(
+      cx + @math.cos(angle) * rx,
+      cy + @math.sin(angle) * ry,
+      cx,
+      cy,
+      rotation,
+    )
+    if index == 0 {
+      verbs.push(MoveTo(point))
+    } else {
+      verbs.push(LineTo(point))
+    }
+    index = index + 1
+  }
+  verbs.push(Close)
+  verbs
+}
+
+///|
+fn quadratic_point(
+  from : @geometry.Point,
+  control : @geometry.Point,
+  to : @geometry.Point,
+  t : Double,
+) -> @geometry.Point {
+  let u = 1.0 - t
+  pt(
+    u * u * from.x + 2.0 * u * t * control.x + t * t * to.x,
+    u * u * from.y + 2.0 * u * t * control.y + t * t * to.y,
+  )
+}
+
+///|
+fn cubic_point(
+  from : @geometry.Point,
+  c1 : @geometry.Point,
+  c2 : @geometry.Point,
+  to : @geometry.Point,
+  t : Double,
+) -> @geometry.Point {
+  let u = 1.0 - t
+  let uu = u * u
+  let tt = t * t
+  pt(
+    uu * u * from.x +
+    3.0 * uu * t * c1.x +
+    3.0 * u * tt * c2.x +
+    tt * t * to.x,
+    uu * u * from.y +
+    3.0 * uu * t * c1.y +
+    3.0 * u * tt * c2.y +
+    tt * t * to.y,
+  )
+}
+
+///|
+/// One straight segment as a rotated capsule: local x runs along the segment, so
+/// the quad stays axis aligned and only the transform carries the slope.
+fn stroke_segment(
+  ctx : @views.PaintContext,
+  from : @geometry.Point,
+  to : @geometry.Point,
+  stroke : @graphics.Color,
+  width : Double,
+) -> Unit {
+  let dx = to.x - from.x
+  let dy = to.y - from.y
+  let length = (dx * dx + dy * dy).sqrt()
+  if length <= 0.0001 || width <= 0.0 {
+    return
+  }
+  let half = width / 2.0
+  let angle = @math.atan2(dy, dx)
+  let cosine = @math.cos(angle)
+  let sine = @math.sin(angle)
+  push_transform(
+    ctx,
+    @graphics.Transform2D::{
+      a: cosine,
+      b: sine,
+      c: 0.0 - sine,
+      d: cosine,
+      tx: from.x,
+      ty: from.y,
+    },
+  )
+  fill_rounded(ctx, rect(0.0 - half, 0.0 - half, length + width, width), half, stroke)
+  pop_transform(ctx)
 }
 
 ///|
@@ -234,20 +350,63 @@ fn fill_path(
 }
 
 ///|
+/// Strokes are flattened here and emitted as capsule quads. Translucent strokes
+/// keep the vector path so overlapping capsules do not darken every joint.
 fn stroke_path(
   ctx : @views.PaintContext,
   verbs : Array[@graphics.PathVerb],
   stroke : @graphics.Color,
   width : Double,
 ) -> Unit {
-  draw_path(
-    ctx,
-    @graphics.PathSpec::new(
-      verbs=verbs,
-      stroke=Some(@graphics.Brush::solid(stroke)),
-      stroke_width=width,
-    ),
-  )
+  if stroke.a < 0.999 {
+    draw_path(
+      ctx,
+      @graphics.PathSpec::new(
+        verbs=verbs,
+        stroke=Some(@graphics.Brush::solid(stroke)),
+        stroke_width=width,
+      ),
+    )
+    return
+  }
+  let mut current = pt(0.0, 0.0)
+  let mut start = current
+  for verb in verbs {
+    match verb {
+      MoveTo(point) => {
+        current = point
+        start = point
+      }
+      LineTo(point) => {
+        stroke_segment(ctx, current, point, stroke, width)
+        current = point
+      }
+      QuadTo(control, point) => {
+        let from = current
+        let mut step = 1
+        while step <= 6 {
+          let next = quadratic_point(from, control, point, step.to_double() / 6.0)
+          stroke_segment(ctx, current, next, stroke, width)
+          current = next
+          step = step + 1
+        }
+      }
+      CubicTo(c1, c2, point) => {
+        let from = current
+        let mut step = 1
+        while step <= 8 {
+          let next = cubic_point(from, c1, c2, point, step.to_double() / 8.0)
+          stroke_segment(ctx, current, next, stroke, width)
+          current = next
+          step = step + 1
+        }
+      }
+      Close => {
+        stroke_segment(ctx, current, start, stroke, width)
+        current = start
+      }
+    }
+  }
 }
 
 ///|
@@ -258,15 +417,8 @@ fn fill_path_outlined(
   stroke : @graphics.Color,
   width : Double,
 ) -> Unit {
-  draw_path(
-    ctx,
-    @graphics.PathSpec::new(
-      verbs=verbs,
-      fill=Some(@graphics.Brush::solid(fill)),
-      stroke=Some(@graphics.Brush::solid(stroke)),
-      stroke_width=width,
-    ),
-  )
+  fill_path(ctx, verbs, fill)
+  stroke_path(ctx, verbs, stroke, width)
 }
 
 ///|
@@ -279,6 +431,42 @@ fn fill_ellipse(
   rotation : Double,
   fill : @graphics.Color,
 ) -> Unit {
+  let long = rx.max(ry)
+  let short = rx.min(ry)
+  if short <= 0.0 {
+    return
+  }
+  if rotation == 0.0 && (long - short).abs() <= 0.0001 {
+    fill_rounded(ctx, rect(cx - rx, cy - ry, rx * 2.0, ry * 2.0), short, fill)
+    return
+  }
+  if long / short <= 1.8 {
+    // A circle scaled in local space stays one analytic quad; the edge softness
+    // scales with the quad, so keep this to near-circular ellipses.
+    let cosine = @math.cos(rotation)
+    let sine = @math.sin(rotation)
+    let scale_x = rx / long
+    let scale_y = ry / long
+    push_transform(
+      ctx,
+      @graphics.Transform2D::{
+        a: scale_x * cosine,
+        b: scale_x * sine,
+        c: 0.0 - scale_y * sine,
+        d: scale_y * cosine,
+        tx: cx,
+        ty: cy,
+      },
+    )
+    fill_rounded(
+      ctx,
+      rect(0.0 - long, 0.0 - long, long * 2.0, long * 2.0),
+      long,
+      fill,
+    )
+    pop_transform(ctx)
+    return
+  }
   fill_path(ctx, ellipse_verbs(cx, cy, rx, ry, rotation), fill)
 }
 
@@ -293,6 +481,16 @@ fn stroke_ellipse(
   stroke : @graphics.Color,
   width : Double,
 ) -> Unit {
+  if rotation == 0.0 && (rx - ry).abs() <= 0.0001 {
+    stroke_rounded(
+      ctx,
+      rect(cx - rx, cy - ry, rx * 2.0, ry * 2.0),
+      rx,
+      stroke,
+      width,
+    )
+    return
+  }
   stroke_path(ctx, ellipse_verbs(cx, cy, rx, ry, rotation), stroke, width)
 }
 
@@ -303,7 +501,15 @@ fn fill_circle(
   radius : Double,
   fill : @graphics.Color,
 ) -> Unit {
-  fill_ellipse(ctx, center.x, center.y, radius, radius, 0.0, fill)
+  if radius <= 0.0 {
+    return
+  }
+  fill_rounded(
+    ctx,
+    rect(center.x - radius, center.y - radius, radius * 2.0, radius * 2.0),
+    radius,
+    fill,
+  )
 }
 
 ///|
@@ -314,7 +520,16 @@ fn stroke_circle(
   stroke : @graphics.Color,
   width : Double,
 ) -> Unit {
-  stroke_ellipse(ctx, center.x, center.y, radius, radius, 0.0, stroke, width)
+  if radius <= 0.0 {
+    return
+  }
+  stroke_rounded(
+    ctx,
+    rect(center.x - radius, center.y - radius, radius * 2.0, radius * 2.0),
+    radius,
+    stroke,
+    width,
+  )
 }
 
 ///|
@@ -325,7 +540,18 @@ fn stroke_line(
   stroke : @graphics.Color,
   width : Double,
 ) -> Unit {
-  stroke_path(ctx, [MoveTo(from), LineTo(to)], stroke, width)
+  if stroke.a < 0.999 {
+    draw_path(
+      ctx,
+      @graphics.PathSpec::new(
+        verbs=[MoveTo(from), LineTo(to)],
+        stroke=Some(@graphics.Brush::solid(stroke)),
+        stroke_width=width,
+      ),
+    )
+    return
+  }
+  stroke_segment(ctx, from, to, stroke, width)
 }
 
 ///|
@@ -846,10 +1072,9 @@ fn paint_pelican_body(ctx : @views.PaintContext, p : Palette, bob : Double) -> U
     Close,
   ]
   fill_path_outlined(ctx, tail, p.cream, p.cream_edge, 3.0)
-  let body = ellipse_verbs(466.0, 318.0 + bob, 82.0, 60.0, -0.12)
-  fill_path(ctx, body, p.cream)
+  fill_ellipse(ctx, 466.0, 318.0 + bob, 82.0, 60.0, -0.12, p.cream)
   fill_ellipse(ctx, 480.0, 338.0 + bob, 55.0, 30.0, -0.08, p.cream_shade)
-  stroke_path(ctx, body, p.cream_edge, 3.0)
+  stroke_ellipse(ctx, 466.0, 318.0 + bob, 82.0, 60.0, -0.12, p.cream_edge, 3.0)
   stroke_path(
     ctx,
     [
