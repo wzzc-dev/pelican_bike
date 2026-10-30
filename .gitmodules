@@ -1,4 +1,4 @@
 [submodule "vendor/MoUI"]
 	path = vendor/MoUI
 	url = git@github.com:wzzc-dev/MoUI.git
-	branch = main
+	branch = fix/web-path-mesh-transfer
