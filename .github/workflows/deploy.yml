@@ -21,6 +21,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          # moon.work lists ./vendor/MoUI/moui and ./vendor/MoUI/moui_web_renderer
+          # as members; a missing member is a hard moon error
+          # ("failed to resolve workspace member ... No such file or directory"),
+          # so the vendored source has to be present before anything builds.
+          submodules: true
 
       - name: Set up MoonBit
         uses: ./.github/actions/setup-moonbit
@@ -51,6 +57,13 @@ jobs:
           test -f dist/pages/web_wasm.wasm
           test -f dist/pages/web_wasm.wasm.br
           test -f dist/pages/bundle-size.json
+
+          # Prove the page carries the vendored (patched) runtime. An
+          # uninitialized submodule directory or a stale copy would silently
+          # ship the registry runtime.js instead, and the symptom would only be
+          # "the site feels laggy" months later.
+          grep -q upload_path_mesh dist/pages/moui_web_renderer/runtime.js
+          grep -q upload_path_mesh dist/pages/moui_web_renderer/canvas2d_runtime.js
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v5

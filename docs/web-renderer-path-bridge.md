@@ -126,24 +126,36 @@ profile per sample:
 
 | scene | mainline | with the fix | note |
 | --- | --- | --- | --- |
-| static geometry (HEAD app, paths repeated) | 2.58-2.64 fps, median 417-433 ms | 3.61-3.77 fps, median 283 ms | the case the cache is for: identical geometry every frame |
+| static geometry (`5d4fef0:app/app.mbt`, paths repeated every frame) | 2.58-2.64 fps, median 417-433 ms | 3.61-3.77 fps, median 283 ms | the case the cache is for |
 | animated scene (workaround app) | 19.75-20.34 fps, median 50 ms | 22.69-23.95 fps | ~10% of draws hit; median unchanged, the gain is headroom |
 | same fix, cache limit forced to 1 | — | 20.00-20.42 fps | equals baseline: splitting upload from draw is free, the retained handles are the whole gain |
 
 wasm-gc artifact grew 481,110 -> 483,663 bytes. The Canvas2D fallback was
 checked in the browser with `forceUnavailable` (3,841 cached draws/s, 68,133
-fills/s).
+fills/s). Re-measured while the machine was loaded (load average 13) the
+direction held: 1.75/2.36 fps vs 2.64/2.97 fps.
 
 ### Building against the vendored source
 
-`vendor/MoUI` is a git submodule pinned to mainline. `moon.work` is *local and
-untracked*: it adds `./vendor/MoUI/moui` and `./vendor/MoUI/moui_web_renderer`
-as workspace members so `moon build`/`moon test` compile the app against the
-vendored source instead of `.mooncakes/wzzc-dev/moui*`, and
-`scripts/package-web-app.mjs` reads it to copy the matching `runtime.js` /
-`canvas2d_runtime.js` into `dist/pages`. It is not committed because
-`.github/workflows/deploy.yml` does not check submodules; delete `moon.work` to
-build the published registry version again. MoUI's own nested submodules
-(`window`, `moui_studio`, `examples/momark`) need
+`vendor/MoUI` is a git submodule and `moon.work` is committed: it adds
+`./vendor/MoUI/moui` and `./vendor/MoUI/moui_web_renderer` as workspace members,
+so `moon build`/`moon test` compile the app against the vendored source instead
+of `.mooncakes/wzzc-dev/moui*`, and `scripts/package-web-app.mjs` reads it to
+decide which `runtime.js` / `canvas2d_runtime.js` to copy into `dist/pages`.
+Because `moon.work` is tracked, CI must have that source present: a workspace
+member directory that does not exist is a hard failure
+(`failed to resolve workspace member ... No such file or directory`), so
+`deploy.yml` checks out with `submodules: true` and greps the packaged runtime
+for `upload_path_mesh` as a marker that the page really carries the patched
+provider.
+
+Two things still point at the open PR and must be reverted once MoUI#7 merges:
+`.gitmodules` pins `branch = fix/web-path-mesh-transfer`, and the recorded
+gitlink is `9fc284b3a`, a commit that MoUI's squash-merge will orphan out of
+`main` history. After the merge, point the branch back at `main` and bump the
+submodule to the merged commit. Until then, delete `moon.work` (and stop the CI
+submodule checkout) to build the published registry version again.
+
+MoUI's own nested submodules are *not* needed to build this app, but
 `git -C vendor/MoUI submodule update --init --depth 1 window moui_studio examples/momark`
-before MoUI's `scripts/check.sh` can resolve its workspace.
+is required before MoUI's `scripts/check.sh` can resolve its own workspace.
