@@ -67,3 +67,17 @@ pub fn web_complete_async_file_dialog(
 ) -> Unit {
   @web.web_complete_async_file_dialog(request_id, ok, text_id)
 }
+
+///|
+pub fn web_dispatch_platform_view_event(
+  raw_id : Int32,
+  id_text_id : Int32,
+  name_text_id : Int32,
+  value_text_id : Int32,
+  detail_text_id : Int32,
+  flag : Bool,
+) -> Unit {
+  @web.web_dispatch_platform_view_event(
+    raw_id, id_text_id, name_text_id, value_text_id, detail_text_id, flag,
+  )
+}

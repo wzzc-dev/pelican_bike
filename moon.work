@@ -2,4 +2,6 @@ members = [
   ".",
   "./vendor/MoUI/moui",
   "./vendor/MoUI/moui_web_renderer",
+  "./vendor/MoUI/moui_3d",
+  "./vendor/MoUI/moui_3d_web_renderer",
 ]

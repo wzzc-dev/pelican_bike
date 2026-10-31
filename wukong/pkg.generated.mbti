@@ -1,0 +1,70 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "examples/pelican_bike/wukong"
+
+import {
+  "moonbitlang/core/debug",
+  "wzzc-dev/moui/core",
+  "wzzc-dev/moui/services",
+  "wzzc-dev/moui_3d",
+}
+
+// Values
+pub fn advance(Model, Double) -> Model
+
+pub fn[Msg] focusable_three_d_viewport(binding~ : @moui_3d.ThreeDViewportBinding, snapshot~ : @moui_3d.ViewportSnapshot, semantics_label? : String, on_event? : ((@moui_3d.ViewportEvent) -> Msg)?, on_key? : ((String, Bool) -> Msg)?) -> @core.View[Msg]
+
+pub fn program() -> @core.Program[Model, Msg]
+
+pub fn program_with_binding(@moui_3d.ThreeDViewportBinding, environment? : @services.AppEnvironment) -> @core.Program[Model, Msg]
+
+pub fn update(Model, Msg) -> Model
+
+pub fn view(Model) -> @core.View[Msg]
+
+// Errors
+
+// Types and methods
+pub struct Model {
+  binding : @moui_3d.ThreeDViewportBinding
+  base_scene : @moui_3d.Scene
+  snapshot : @moui_3d.ViewportSnapshot
+  clips : Array[@moui_3d.AnimationClip]
+  character_node : Int32
+  state : WukongState
+  clip : Int32
+  clip_time : Double
+  attack_time : Double
+  pos_x : Double
+  pos_z : Double
+  pos_y : Double
+  vel_y : Double
+  facing : Double
+  keys : Array[String]
+  elapsed : Double
+  ticks : Int64
+  loaded : Bool
+}
+pub fn Model::new() -> Self
+pub fn Model::new_with_binding(@moui_3d.ThreeDViewportBinding) -> Self
+
+pub(all) enum Msg {
+  Noop
+  Tick(Double)
+  Key(String, Bool)
+  Viewport(@moui_3d.ViewportEvent)
+}
+
+pub(all) enum WukongState {
+  Idle
+  Walk
+  Run
+  Jump
+  Attack
+} derive(Eq, @debug.Debug)
+pub fn WukongState::equal(Self, Self) -> Bool
+pub fn WukongState::not_equal(Self, Self) -> Bool
+pub fn WukongState::to_repr(Self) -> @debug.Repr
+
+// Type aliases
+
+// Traits
