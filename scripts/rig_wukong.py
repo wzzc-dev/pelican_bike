@@ -198,7 +198,10 @@ tt = np.clip(((V - staff_line_a) @ ab) / (ab @ ab), 0, 1)
 dl = np.linalg.norm(V - (staff_line_a + np.outer(tt, ab)), axis=1)
 # the rod protrudes past the sleeve (|x| large, low) and crosses above the
 # shoulder (high); the middle runs along the chest so chest weights win there.
-staff = (dl < 0.04 * SCALE) & ((y > 0.72 * SCALE) | (np.abs(x) > 0.20 * SCALE))
+staff = dl < 0.045 * SCALE
+# keep sleeve/cape bulk out: the rod is thin, so also require it to be off
+# the body column or above the shoulder line
+staff &= (np.abs(x) > 0.14 * SCALE) | (y > 0.70 * SCALE) | (np.abs(x - 0.03) < 0.06 * SCALE)
 force("hand_r", staff)
 log(f"staff override: {staff.sum()} verts")
 
@@ -440,13 +443,13 @@ clip("jump", [
 clip("attack", [
     # wind-up: torso coils right, staff hand draws back; strike: everything
     # whips left through the body so the rod sweeps a wide horizontal arc.
-    rot_chan("upper_arm_r", [(0, IDQ), (.22, mulq(RY(60), RZ(14))), (.40, mulq(RY(-100), RZ(-6))),
-                             (.58, mulq(RY(-55), RZ(-2))), (.9, IDQ)]),
-    rot_chan("forearm_r", [(0, IDQ), (.22, RY(40)), (.40, RY(-50)), (.58, RY(-22)), (.9, IDQ)]),
+    rot_chan("upper_arm_r", [(0, IDQ), (.22, mulq(RY(55), RZ(-52))), (.40, mulq(RY(-95), RZ(-62))),
+                             (.58, mulq(RY(-45), RZ(-30))), (.9, IDQ)]),
+    rot_chan("forearm_r", [(0, IDQ), (.22, RZ(18)), (.40, RZ(-14)), (.58, RZ(-8)), (.9, IDQ)]),
     rot_chan("spine", [(0, IDQ), (.22, mulq(RX(-4), RY(26))), (.40, mulq(RX(-8), RY(-36))),
                        (.58, RY(-18)), (.9, IDQ)]),
     rot_chan("upper_arm_l", [(0, IDQ), (.22, RY(-35)), (.40, RY(30)), (.58, RY(14)), (.9, IDQ)]),
-    rot_chan("head", [(0, IDQ), (.22, RY(16)), (.40, RY(-20)), (.58, RY(-10)), (.9, IDQ)]),
+    rot_chan("head", [(0, IDQ), (.22, RY(10)), (.40, RY(-12)), (.58, RY(-6)), (.9, IDQ)]),
     rot_chan("thigh_r", [(0, RX(0)), (.4, RX(-12)), (.6, RX(-6)), (.9, RX(0))]),
     rot_chan("shin_r", [(0, RX(0)), (.4, RX(16)), (.6, RX(8)), (.9, RX(0))]),
     rot_chan("tail_1", [(0, IDQ), (.3, RX(-18)), (.9, IDQ)]),
