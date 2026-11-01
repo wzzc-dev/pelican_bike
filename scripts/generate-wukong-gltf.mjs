@@ -147,17 +147,21 @@ const INVERSE_BIND = BONE_WORLD.map(invRigid);
 
 // -------------------------------------------------------------- palette ----
 const MATS = {
-  fur: { c: [0.55, 0.38, 0.22], m: 0.0, r: 0.85 },
+  fur: { c: [0.5, 0.32, 0.17], m: 0.0, r: 0.85 },
   furLight: { c: [0.74, 0.56, 0.36], m: 0.0, r: 0.85 },
   skin: { c: [0.94, 0.79, 0.62], m: 0.0, r: 0.7 },
-  gold: { c: [0.88, 0.72, 0.24], m: 0.65, r: 0.35 },
-  goldDeep: { c: [0.66, 0.5, 0.16], m: 0.6, r: 0.42 },
-  red: { c: [0.78, 0.2, 0.17], m: 0.0, r: 0.8 },
-  redDeep: { c: [0.55, 0.12, 0.12], m: 0.0, r: 0.8 },
+  gold: { c: [0.92, 0.7, 0.14], m: 0.75, r: 0.3 },
+  goldDeep: { c: [0.7, 0.5, 0.1], m: 0.7, r: 0.38 },
+  red: { c: [0.75, 0.12, 0.1], m: 0.0, r: 0.75 },
+  redDeep: { c: [0.5, 0.08, 0.08], m: 0.0, r: 0.75 },
   pants: { c: [0.24, 0.3, 0.44], m: 0.0, r: 0.85 },
   boot: { c: [0.14, 0.13, 0.15], m: 0.15, r: 0.55 },
   white: { c: [0.92, 0.91, 0.86], m: 0.0, r: 0.75 },
   iron: { c: [0.4, 0.41, 0.44], m: 0.55, r: 0.45 },
+  tiger: { c: [0.85, 0.55, 0.15], m: 0.0, r: 0.85 },
+  tigerStripe: { c: [0.2, 0.13, 0.09], m: 0.0, r: 0.9 },
+  feather: { c: [0.85, 0.62, 0.28], m: 0.3, r: 0.5 },
+  cream: { c: [0.9, 0.72, 0.55], m: 0.0, r: 0.75 },
   dark: { c: [0.07, 0.06, 0.07], m: 0.0, r: 0.5 },
   ground: { c: [0.16, 0.19, 0.24], m: 0.0, r: 0.95 },
 };
@@ -398,7 +402,7 @@ function addBox(mat, boneA, boneB, c, s, rot = null) {
 // ------------------------------------------------------------- sculpting ----
 // Head (bound to `head`): skull, face patch, muzzle, nose, eyes, brows, ears.
 addEllipsoid("fur", "head", null, [0, 1.47, 0], [0.125, 0.135, 0.12]);
-addEllipsoid("furLight", "head", null, [0, 1.445, 0.085], [0.088, 0.095, 0.06]);
+addEllipsoid("cream", "head", null, [0, 1.45, 0.08], [0.095, 0.105, 0.06]);
 addEllipsoid("skin", "head", null, [0, 1.415, 0.125], [0.05, 0.038, 0.042]);
 addEllipsoid("dark", "head", null, [0, 1.435, 0.155], [0.016, 0.011, 0.012], 6, 4);
 addEllipsoid("white", "head", null, [0.052, 1.485, 0.105], [0.023, 0.024, 0.016], 8, 5);
@@ -413,14 +417,40 @@ addEllipsoid("fur", "head", null, [-0.132, 1.465, 0], [0.022, 0.038, 0.03], 6, 5
 addEllipsoid("fur", "head", null, [0, 1.575, -0.01], [0.1, 0.055, 0.1], 8, 4);
 addBand("gold", "head", null, [0, 1.565, 0], 0.128, 0.035, 16);
 addEllipsoid("gold", "head", null, [0, 1.615, -0.01], [0.045, 0.03, 0.05], 8, 5);
-addEllipsoid("red", "head", null, [0.055, 1.675, -0.015], [0.014, 0.07, 0.05]);
-addEllipsoid("red", "head", null, [-0.055, 1.675, -0.015], [0.014, 0.07, 0.05]);
-addEllipsoid("gold", "head", null, [0, 1.7, -0.015], [0.02, 0.02, 0.02], 6, 4);
+// Two long curved plumes rising from the crown, swept back like the classic
+// 凤翅紫金冠 silhouette. Each is a lofted tube so it bends instead of reading
+// as a stick.
+addTube("feather", [
+  { p: [0.05, 1.66, -0.01], r: 0.017, bone: "head" },
+  { p: [0.13, 1.88, -0.04], r: 0.021, bone: "head" },
+  { p: [0.24, 2.06, -0.12], r: 0.014, bone: "head" },
+  { p: [0.32, 2.16, -0.24], r: 0.006, bone: "head" },
+], 5);
+addTube("feather", [
+  { p: [-0.05, 1.66, -0.01], r: 0.017, bone: "head" },
+  { p: [-0.13, 1.88, -0.04], r: 0.021, bone: "head" },
+  { p: [-0.24, 2.06, -0.12], r: 0.014, bone: "head" },
+  { p: [-0.32, 2.16, -0.24], r: 0.006, bone: "head" },
+], 5);
+// gold crown base holding the plumes
+addEllipsoid("gold", "head", null, [0, 1.7, -0.015], [0.024, 0.026, 0.024], 6, 4);
 
 // Torso: pelvis, kilt with gold hem, belt buckle, abdomen, cuirass.
 addEllipsoid("redDeep", "hips", "spine", [0, 0.8, 0], [0.155, 0.1, 0.115]);
-addBand("red", "hips", null, [0, 0.7, 0], 0.175, 0.17, 16);
-addBand("gold", "hips", null, [0, 0.615, 0], 0.185, 0.028, 16);
+// 虎皮裙: tiger-striped skirt with a ragged hem and a gold sash knot.
+addBand("tiger", "hips", null, [0, 0.69, 0], 0.178, 0.19, 16);
+for (let i = 0; i < 18; i++) {
+  const a = (i / 18) * Math.PI * 2 + 0.19;
+  const r = 0.183;
+  const row = i % 2;
+  addBox(
+    "tigerStripe", "hips", null,
+    [Math.cos(a) * r, 0.705 - row * 0.055, Math.sin(a) * r],
+    [0.03, 0.05, 0.012],
+    [[0, 1, 0], 90 - (a * 180) / Math.PI],
+  );
+}
+addBand("gold", "hips", null, [0, 0.595, 0], 0.186, 0.03, 16);
 addBand("gold", "hips", null, [0, 0.855, 0], 0.16, 0.045, 16);
 addEllipsoid("goldDeep", "hips", null, [0, 0.855, 0.15], [0.045, 0.04, 0.03], 8, 5);
 addCapsule("red", "spine", "chest", [0, 0.93, 0], [0, 1.1, 0], 0.115, 0.135, 10);
@@ -433,6 +463,12 @@ addCapsule("fur", "neck", "head", [0, 1.27, 0], [0, 1.34, 0], 0.05, 0.055, 8, 0.
 
 // Scarf: neck knot (static on neck) + flowing panels on scarf_1..3.
 addBand("red", "neck", null, [0, 1.29, 0], 0.115, 0.06, 14);
+// 项圈: gold torque ring with five beads on the front
+addBand("gold", "chest", null, [0, 1.245, 0], 0.108, 0.022, 14);
+for (let i = -2; i <= 2; i++) {
+  const a = Math.PI / 2 + i * 0.42;
+  addEllipsoid("goldDeep", "chest", null, [Math.cos(a) * 0.108, 1.24, Math.sin(a) * 0.108], [0.016, 0.016, 0.016], 6, 4);
+}
 addTube("red", [
   { p: [0, 1.24, -0.1], r: 0.075, bone: "scarf_1" },
   { p: [0, 1.12, -0.16], r: 0.06, bone: "scarf_2" },
@@ -475,8 +511,8 @@ staffSeg("redDeep", 0.59, 0.62, 0.024);
 // Legs: thigh, knee, shin boot, gold cuff, upturned-toe shoe.
 for (const side of ["l", "r"]) {
   const s = side === "l" ? 1 : -1;
-  addCapsule("pants", `thigh_${side}`, `shin_${side}`, [s * 0.09, 0.72, 0], [s * 0.09, 0.44, 0], 0.058, 0.05, 8);
-  addEllipsoid("pants", `shin_${side}`, null, [s * 0.09, 0.42, 0.005], [0.052, 0.05, 0.055], 6, 5);
+  addCapsule("tiger", `thigh_${side}`, `shin_${side}`, [s * 0.09, 0.72, 0], [s * 0.09, 0.44, 0], 0.058, 0.05, 8);
+  addEllipsoid("fur", `shin_${side}`, null, [s * 0.09, 0.42, 0.005], [0.052, 0.05, 0.055], 6, 5);
   addCapsule("boot", `shin_${side}`, `foot_${side}`, [s * 0.09, 0.4, 0], [s * 0.09, 0.13, 0], 0.05, 0.042, 8);
   addBand("gold", `foot_${side}`, null, [s * 0.09, 0.155, 0], 0.055, 0.025, 10);
   addCapsule("boot", `foot_${side}`, null, [s * 0.09, 0.055, -0.02], [s * 0.09, 0.06, 0.15], 0.045, 0.032, 8, 0.4);
