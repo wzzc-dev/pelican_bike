@@ -15,8 +15,25 @@ test "wukong scene loads with skeleton, clips and skin" {
   let root = scene.nodes()[model.character_node]
   assert_true(root.skin() is Some(_))
   let mesh = scene.mesh(root.mesh().unwrap()).unwrap()
-  let vertex = mesh.primitives()[0].vertices()[0]
-  assert_true(vertex.weights().x() > 0.9)
+  // At least one vertex of the body carries a dominant bone weight, and
+  // every vertex's weights sum to ~1 (the palette split can start on a
+  // blended vertex, so scan instead of indexing).
+  let mut found_dominant = false
+  let mut all_normalized = true
+  for prim in mesh.primitives() {
+    for vertex in prim.vertices() {
+      let w = vertex.weights()
+      let sum = w.x() + w.y() + w.z() + w.w()
+      if sum < 0.99 || sum > 1.01 {
+        all_normalized = false
+      }
+      if w.x() > 0.9 || w.y() > 0.9 || w.z() > 0.9 || w.w() > 0.9 {
+        found_dominant = true
+      }
+    }
+  }
+  assert_true(found_dominant)
+  assert_true(all_normalized)
 }
 
 ///|

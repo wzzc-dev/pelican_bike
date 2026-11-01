@@ -23,9 +23,12 @@ import { writeFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
+// The live asset is the rigged download (see scripts/rig_wukong.py); this
+// procedural model is the fallback. Output to its own path so regenerating
+// never clobbers the shipped gltf.
 const outPath =
   process.argv[2] ??
-  resolve(dirname(fileURLToPath(import.meta.url)), "../wukong/wukong.gltf");
+  resolve(dirname(fileURLToPath(import.meta.url)), "../wukong/wukong_procedural.gltf");
 
 // ---------------------------------------------------------------- math ----
 const DEG = Math.PI / 180;
