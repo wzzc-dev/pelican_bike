@@ -199,7 +199,7 @@ dl = np.linalg.norm(V - (staff_line_a + np.outer(tt, ab)), axis=1)
 # the rod protrudes past the sleeve (|x| large, low) and crosses above the
 # shoulder (high); the middle runs along the chest so chest weights win there.
 staff = (dl < 0.04 * SCALE) & ((y > 0.72 * SCALE) | (np.abs(x) > 0.20 * SCALE))
-force("chest", staff)
+force("hand_r", staff)
 log(f"staff override: {staff.sum()} verts")
 
 # plumes + crown: everything above the head bone joint that is thin/high
@@ -388,9 +388,8 @@ def walk_run(name, dur, legA, kneeA, armA, lean, bob):
         rot_chan("shin_l", [(t(0), RX(0)), (t(.25), RX(kneeA * .5)), (t(.5), RX(0)), (t(.75), RX(kneeA)), (t(1), RX(0))]),
         rot_chan("shin_r", [(t(0), RX(0)), (t(.25), RX(kneeA)), (t(.5), RX(0)), (t(.75), RX(kneeA * .5)), (t(1), RX(0))]),
         rot_chan("upper_arm_l", [(t(0), RY(armA)), (t(.5), RY(-armA)), (t(1), RY(armA))]),
-        rot_chan("upper_arm_r", [(t(0), RY(-armA)), (t(.5), RY(armA)), (t(1), RY(-armA))]),
+        rot_chan("upper_arm_r", [(t(0), RY(armA * .18)), (t(.5), RY(-armA * .18)), (t(1), RY(armA * .18))]),
         rot_chan("forearm_l", [(t(0), RX(-10)), (t(.5), RX(-20)), (t(1), RX(-10))]),
-        rot_chan("forearm_r", [(t(0), RX(-20)), (t(.5), RX(-10)), (t(1), RX(-20))]),
         rot_chan("spine", [(0, RX(-lean)), (t(1), RX(-lean))]),
         rot_chan("tail_1", [(t(0), RY(10)), (t(.5), RY(-10)), (t(1), RY(10))]),
         rot_chan("tail_2", [(t(0), RY(14)), (t(.5), RY(-14)), (t(1), RY(14))]),
@@ -428,8 +427,8 @@ clip("jump", [
     rot_chan("thigh_r", [(0, RX(0)), (.15, RX(-30)), (.3, RX(-40)), (.45, RX(-8)), (.6, RX(-30)), (.75, RX(0))]),
     rot_chan("shin_l", [(0, RX(0)), (.15, RX(65)), (.3, RX(55)), (.45, RX(8)), (.6, RX(55)), (.75, RX(0))]),
     rot_chan("shin_r", [(0, RX(0)), (.15, RX(65)), (.3, RX(45)), (.45, RX(4)), (.6, RX(50)), (.75, RX(0))]),
-    rot_chan("upper_arm_l", [(0, IDQ), (.3, RZ(35)), (.45, RZ(50)), (.75, IDQ)]),
-    rot_chan("upper_arm_r", [(0, IDQ), (.3, RZ(-35)), (.45, RZ(-50)), (.75, IDQ)]),
+    rot_chan("upper_arm_l", [(0, IDQ), (.3, RZ(45)), (.45, RZ(60)), (.75, IDQ)]),
+    rot_chan("upper_arm_r", [(0, IDQ), (.3, RZ(-6)), (.45, RZ(-8)), (.75, IDQ)]),
     rot_chan("spine", [(0, RX(0)), (.15, RX(-16)), (.3, RX(6)), (.6, RX(-12)), (.75, RX(0))]),
     rot_chan("tail_1", [(0, IDQ), (.3, RX(-22)), (.6, RX(-12)), (.75, IDQ)]),
     rot_chan("tail_2", [(0, IDQ), (.3, RX(-28)), (.6, RX(-16)), (.75, IDQ)]),
@@ -439,12 +438,15 @@ clip("jump", [
     rot_chan("scarf_3", [(0, IDQ), (.3, RX(-48)), (.75, IDQ)]),
 ])
 clip("attack", [
-    rot_chan("upper_arm_r", [(0, IDQ), (.2, mulq(RY(50), RZ(-25))), (.4, mulq(RY(-65), RZ(-10))),
-                             (.6, mulq(RY(-25), RZ(-5))), (.9, IDQ)]),
-    rot_chan("forearm_r", [(0, IDQ), (.2, RZ(30)), (.4, RZ(-20)), (.6, RZ(-8)), (.9, IDQ)]),
-    rot_chan("spine", [(0, IDQ), (.2, mulq(RX(-5), RY(20))), (.4, mulq(RX(-8), RY(-24))), (.6, RY(-8)), (.9, IDQ)]),
-    rot_chan("upper_arm_l", [(0, IDQ), (.25, RY(-22)), (.45, RY(18)), (.9, IDQ)]),
-    rot_chan("head", [(0, IDQ), (.25, RY(10)), (.45, RY(-12)), (.9, IDQ)]),
+    # wind-up: torso coils right, staff hand draws back; strike: everything
+    # whips left through the body so the rod sweeps a wide horizontal arc.
+    rot_chan("upper_arm_r", [(0, IDQ), (.22, mulq(RY(60), RZ(14))), (.40, mulq(RY(-100), RZ(-6))),
+                             (.58, mulq(RY(-55), RZ(-2))), (.9, IDQ)]),
+    rot_chan("forearm_r", [(0, IDQ), (.22, RY(40)), (.40, RY(-50)), (.58, RY(-22)), (.9, IDQ)]),
+    rot_chan("spine", [(0, IDQ), (.22, mulq(RX(-4), RY(26))), (.40, mulq(RX(-8), RY(-36))),
+                       (.58, RY(-18)), (.9, IDQ)]),
+    rot_chan("upper_arm_l", [(0, IDQ), (.22, RY(-35)), (.40, RY(30)), (.58, RY(14)), (.9, IDQ)]),
+    rot_chan("head", [(0, IDQ), (.22, RY(16)), (.40, RY(-20)), (.58, RY(-10)), (.9, IDQ)]),
     rot_chan("thigh_r", [(0, RX(0)), (.4, RX(-12)), (.6, RX(-6)), (.9, RX(0))]),
     rot_chan("shin_r", [(0, RX(0)), (.4, RX(16)), (.6, RX(8)), (.9, RX(0))]),
     rot_chan("tail_1", [(0, IDQ), (.3, RX(-18)), (.9, IDQ)]),
