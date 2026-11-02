@@ -63,6 +63,7 @@ pub struct Model {
   drag_moved : Double
   staff_out : Bool
   staff_node : Int32
+  staff_hide_node : Int32
 }
 
 ///|
@@ -119,15 +120,16 @@ pub fn Model::new_with_binding(
     drag_y: 0.0,
     drag_moved: 0.0,
     staff_out: true,
-    staff_node: find_staff_node(scene),
+    staff_node: find_node_by_name(scene, "staff_gear"),
+    staff_hide_node: find_node_by_name(scene, "staff_hide"),
   }
 }
 
 ///|
-fn find_staff_node(scene : @moui_3d.Scene) -> Int32 {
+fn find_node_by_name(scene : @moui_3d.Scene, name : String) -> Int32 {
   let mut result = -1
   for index, node in scene.nodes() {
-    if node.name() == "staff_gear" {
+    if node.name() == name {
       result = index
     }
   }
@@ -460,6 +462,17 @@ fn refresh_pose(model : Model) -> Model {
         value=[staff_scale, staff_scale, staff_scale],
       ),
     )
+    if model.staff_hide_node >= 0 {
+      // Buried rod shells ride the staff_hide bone; it must hold the same
+      // scale as the equipment or the ghost rod pops back after the clip.
+      with_staff.push(
+        @moui_3d.AnimationSample::new(
+          node=@moui_3d.NodeId::new(model.staff_hide_node),
+          path=@moui_3d.Scale,
+          value=[staff_scale, staff_scale, staff_scale],
+        ),
+      )
+    }
     model.base_scene.apply_animation_samples(with_staff)
   }
   let camera = model.snapshot.camera().with_target(
