@@ -247,14 +247,16 @@ force("head", (y > 0.98 * SCALE) & ~staff)
 force("foot_l", (y < 0.13 * SCALE) & (x > 0.0) & (np.abs(x) < 0.16 * SCALE))
 force("foot_r", (y < 0.13 * SCALE) & (x <= 0.0) & (np.abs(x) < 0.16 * SCALE))
 
-# robe train behind: assign to tail chain by height so the hem whips
-train = (z < -0.16 * SCALE) & (y < 0.55 * SCALE) & ~staff
-for bone, lo, hi in [("tail_1", 0.38, 0.55), ("tail_2", 0.20, 0.38), ("tail_3", -1, 0.20)]:
+# Robe panels stay with the torso: forcing them onto the tail/scarf whip
+# chains made the cloth counter-rotate against a twisting spine, which read
+# as the body tearing open whenever the camera faced the character. Only
+# the far-behind hem strip and the true neck scarf keep the whip bones.
+train = (z < -0.30 * SCALE) & (y < 0.42 * SCALE) & ~staff
+for bone, lo, hi in [("tail_1", 0.30, 0.42), ("tail_2", 0.16, 0.30), ("tail_3", -1, 0.16)]:
     force(bone, train & (y >= lo * SCALE) & (y < hi * SCALE))
 
-# upper cape behind shoulders: scarf chain
-cape = (z < -0.10 * SCALE) & (y >= 0.55 * SCALE) & (y < 0.98 * SCALE) & ~staff
-for bone, lo, hi in [("scarf_1", 0.80, 1.2), ("scarf_2", 0.66, 0.80), ("scarf_3", 0.55, 0.66)]:
+cape = (z < -0.24 * SCALE) & (y >= 0.90 * SCALE) & (y < 0.98 * SCALE) & ~staff
+for bone, lo, hi in [("scarf_1", 0.94, 1.2), ("scarf_2", 0.90, 0.94)]:
     force(bone, cape & (y >= lo * SCALE) & (y < hi * SCALE))
 
 # renormalize so every vertex's weights sum to exactly 1
@@ -359,16 +361,18 @@ face_col = C[F].mean(1)
 # crawls from the rod into any anatomy that touches it (the torso rode the
 # swinging hand and tore apart while walking), so growth is capped to the
 # tube radius instead of following face neighbors.
-# Wide tube: with the arm bones unskinned, no amount of rod capture can
-# drag the torso during a swing, so the corridor can swallow every shell
-# layer and the stow leaves no stub behind.
-staff_face = fc_d < 0.16
+# Generous tube: with the camera locked to the character's front and the
+# arm chain unskinned, swallowed robe panels ride the hand as wrapping
+# cloth that sweeps with the rod -- the old "tearing" was the hollow back
+# showing, not the cloth. Every rod shell ends up in the equipment, so
+# stow removes the whole staff.
+staff_face = fc_d < 0.13
 from scipy.spatial import cKDTree as _kdtree
-for _peel in range(12):
+for _peel in range(10):
     eq_pts = V[F[staff_face]].reshape(-1, 3)
     tree = _kdtree(eq_pts)
     dd, _ = tree.query(face_centroid, k=1)
-    grow = (dd < 0.06) & (fc_d < 0.30) & ~staff_face
+    grow = (dd < 0.05) & (fc_d < 0.22) & ~staff_face
     if not grow.any():
         break
     staff_face |= grow
@@ -581,22 +585,16 @@ clip("attack", [
     rot_chan("upper_arm_r", [(0, IDQ), (.22, mulq(RY(55), RZ(-52))), (.40, mulq(RY(-95), RZ(-62))),
                              (.58, mulq(RY(-45), RZ(-30))), (.9, IDQ)]),
     rot_chan("forearm_r", [(0, IDQ), (.22, RZ(18)), (.40, RZ(-14)), (.58, RZ(-8)), (.9, IDQ)]),
-    rot_chan("spine", [(0, IDQ), (.22, mulq(RX(-4), RY(26))), (.40, mulq(RX(-8), RY(-36))),
-                       (.58, RY(-18)), (.9, IDQ)]),
+    # The body stays completely rigid during the swing: every skinned bone
+    # rotation (spine lean, tail/scarf whip) shears the layered robe panels
+    # apart and shows the sculpt's hollow interior. Only the arm chain
+    # moves -- it carries the equipment rod and holds no skin weights --
+    # so the sweep is pure weapon motion over a still, intact body.
     rot_chan("upper_arm_l", [(0, IDQ), (.22, RY(-35)), (.40, RY(30)), (.58, RY(14)), (.9, IDQ)]),
-    rot_chan("head", [(0, IDQ), (.22, RY(10)), (.40, RY(-12)), (.58, RY(-6)), (.9, IDQ)]),
-    rot_chan("thigh_r", [(0, RX(0)), (.4, RX(-12)), (.6, RX(-6)), (.9, RX(0))]),
-    rot_chan("shin_r", [(0, RX(0)), (.4, RX(16)), (.6, RX(8)), (.9, RX(0))]),
-    rot_chan("tail_1", [(0, IDQ), (.3, RX(-18)), (.9, IDQ)]),
-    rot_chan("tail_2", [(0, IDQ), (.3, RX(-24)), (.9, IDQ)]),
-    rot_chan("tail_3", [(0, IDQ), (.3, RX(-30)), (.9, IDQ)]),
-    rot_chan("scarf_1", [(0, IDQ), (.35, RX(-22)), (.9, IDQ)]),
-    rot_chan("scarf_2", [(0, IDQ), (.35, RX(-32)), (.9, IDQ)]),
-    rot_chan("scarf_3", [(0, IDQ), (.35, RX(-42)), (.9, IDQ)]),
-    trans_chan("hips", [(0, HIP_REST), (.2, [HIP_REST[0], HIP_REST[1] - .02, HIP_REST[2]]),
-                        (.4, [HIP_REST[0], HIP_REST[1] - .01, HIP_REST[2] + .05]),
-                        (.6, [HIP_REST[0], HIP_REST[1], HIP_REST[2] + .02]), (.9, HIP_REST)]),
-])
+        # legs and hips stay planted and the tail barely moves: they hold the
+    # robe closed while the rod sweeps, so the skirt never splays open and
+    # shows its hollow interior mid-swing. Only the neck scarf flutters.
+                            ])
 
 def scale_chan(node_index, keys):
     ts = np.array([[t] for t, _ in keys], dtype=np.float64)

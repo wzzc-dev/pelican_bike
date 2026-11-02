@@ -327,10 +327,10 @@ pub fn advance(model : Model, delta_input : Double) -> Model {
   let azimuth = model.snapshot.camera().azimuth()
   // camera sits at target + radius*(sin az, ., cos az); forward is toward the
   // target, i.e. (-sin az, -cos az) on the ground plane; right is its perp.
-  let fwd_x = -@math.sin(azimuth)
-  let fwd_z = -@math.cos(azimuth)
-  let right_x = -fwd_z
-  let right_z = fwd_x
+  let fwd_x = @math.sin(azimuth)
+  let fwd_z = @math.cos(azimuth)
+  let right_x = fwd_z
+  let right_z = -fwd_x
   let axis_x = (if forward { fwd_x } else { 0.0 }) - (if back { fwd_x } else { 0.0 })
   let axis_z = (if forward { fwd_z } else { 0.0 }) - (if back { fwd_z } else { 0.0 })
   let strafe_x = (if right { right_x } else { 0.0 }) - (if left { right_x } else { 0.0 })
@@ -338,13 +338,10 @@ pub fn advance(model : Model, delta_input : Double) -> Model {
   let dir_x = axis_x + strafe_x
   let dir_z = axis_z + strafe_z
   let dir_len = (dir_x * dir_x + dir_z * dir_z).sqrt()
-  let facing = if state == Attack || state == Jump || state == Equip || state == Stow {
-    model.facing
-  } else if dir_len > 0.0001 {
-    @math.atan2(dir_x, dir_z)
-  } else {
-    model.facing
-  }
+  // Showcase facing: always look at the camera. The sculpt's back is a
+  // hollow of overlapping robe panels, so the character never turns it to
+  // the viewer; W/S move toward/away from the camera and A/D strafe.
+  let facing = model.snapshot.camera().azimuth()
   let (pos_x, pos_z) = if speed <= 0.0 || state == Jump || dir_len <= 0.0001 {
     (model.pos_x, model.pos_z)
   } else {

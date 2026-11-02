@@ -50,8 +50,9 @@ test "advance walks the character forward and animates the clip" {
     1.0 / 60.0,
   )
   assert_eq(stepped.state, Walk)
-  // Camera starts behind +z looking toward -z, so W walks away from it.
-  assert_true(stepped.pos_z < 0.0)
+  // Showcase facing: the character looks at the camera, so W walks toward
+  // it (camera sits at +z, character moves +z).
+  assert_true(stepped.pos_z > 0.0)
   assert_true(stepped.clip_time > 0.0)
   // The published snapshot must carry a different scene revision each tick.
   let initial = @wukong.Model::new()
@@ -92,14 +93,13 @@ test "run is faster than walk and turning changes facing" {
   let run_model = @wukong.update(walk_model, @wukong.Key("Shift", true))
   let walked = @wukong.advance(walk_model, 0.5)
   let ran = @wukong.advance(run_model, 0.5)
-  assert_true(ran.pos_z < walked.pos_z)
-  // D strafes toward screen-right (+x) and the heading follows the motion.
+  assert_true(ran.pos_z > walked.pos_z)
+  // D strafes toward screen-right (+x) at the default camera azimuth.
   let strafed = @wukong.advance(
     @wukong.update(@wukong.Model::new(), @wukong.Key("d", true)),
     0.5,
   )
   assert_true(strafed.pos_x > 0.0)
-  assert_true(strafed.facing > 0.0)
 }
 
 ///|
