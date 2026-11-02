@@ -117,7 +117,6 @@ BONES = [
     ("upper_arm_r", 10, (-0.05, -0.01, 0.02)),
     ("forearm_r", 11, (-0.02, -0.18, 0.0)),
     ("hand_r", 12, (-0.02, -0.16, 0.0)),
-    ("staff_hide", 12, (0.0, 0.0, 0.0)),  # offset patched after tips are known
     ("thigh_l", 1, (0.075, -0.02, 0.0)),
     ("shin_l", 14, (0.0, -0.22, 0.0)),
     ("foot_l", 15, (0.0, -0.18, 0.0)),
@@ -224,12 +223,6 @@ for _iter in range(3):
     if len(pts) >= 3:
         curve = pts
 ROD = curve
-# staff_hide sits at the rod midpoint so collapsing it pulls ghost shells
-# into the body interior instead of the hand (no degenerate spike fans)
-_si = next(i for i, b in enumerate(BONES) if b[0] == "staff_hide")
-_hi = next(i for i, b in enumerate(BONES) if b[0] == "hand_r")
-BONES[_si] = (BONES[_si][0], BONES[_si][1], tuple((RA + RB) / 2 - JPOS["hand_r"]))
-JPOS["staff_hide"] = (RA + RB) / 2
 sdl = _poly_dist(V, ROD)
 staff = sdl < 0.075
 log(f"staff equipment verts: {staff.sum()}")
@@ -341,57 +334,28 @@ face_col = C[F].mean(1)
 # Corridor around the fitted centerline, then peel duplicate shells that sit
 # one spacing away; the sleeve wrapping the rod is farther out and survives.
 face_col = C[F].mean(1)
-# The rod is wrapped in a cloth ribbon that reads as part of the weapon in
-# silhouette, so extraction follows the rod's own hues: saturated gold
-# (r-b ~ .45) and dark red (r-b ~ .45), while the cream sleeve (r-b ~ .35)
-# and pale cape stay anatomy. Seed by centerline corridor, then peel along
-# touching rod-colored faces so the wrapped layers come out as one piece.
-rod_hue = (face_col[:, 0] - face_col[:, 2]) > 0.40
-staff_face = (fc_d < 0.13) & (rod_hue | (fc_d < 0.06))
-# the upper tip beyond the fitted centerline: pull the whole exposed cap in
-staff_face |= (
-    (face_centroid[:, 0] > 0.26)
-    & (face_centroid[:, 1] > 1.18)
-    & (fc_d < 0.35)
-)
+# The sculpt stacks the rod in duplicate shells wrapped by a cloth ribbon.
+# Extract generously: seed the centerline corridor, peel along touching
+# faces, then absorb every warm-toned face still hugging the line. Leaving
+# rod shells in the body is unacceptable (they stay on the shoulder while
+# the equipment swings away, so the staff visibly splits in two); a few
+# ribbon faces riding along is harmless.
+staff_face = fc_d < 0.10
 from scipy.spatial import cKDTree as _kdtree
-for _peel in range(12):
+for _peel in range(10):
     eq_pts = V[F[staff_face]].reshape(-1, 3)
     tree = _kdtree(eq_pts)
     dd, _ = tree.query(face_centroid, k=1)
-    grow = (dd < 0.05) & rod_hue & (fc_d < 0.30) & ~staff_face
+    grow = (dd < 0.06) & (fc_d < 0.24) & ~staff_face
     if not grow.any():
         break
     staff_face |= grow
-# Ghost rod shells the corridor missed bind to the staff_hide bone instead
-# of joining the equipment: scaling that bone to zero on stow collapses the
-# shells into the body interior, hiding the whole rod including buried
-# layers. Faces farther out than the shell stack are sleeve and stay put.
 log(f"staff faces captured: {staff_face.sum()}")
-rod_warm = rod_hue
-# Ghost shells only where the rod protrudes beyond the torso silhouette and
-# within one shell stack of the centerline; the plumes and cape also run
-# warm near the line and must stay anatomy.
-exposed_zone = (
-    (face_centroid[:, 0] < -0.30)
-    | (face_centroid[:, 0] > 0.35)
-    | ((face_centroid[:, 1] > 1.25) & (face_centroid[:, 2] < -0.25))
-)
-ghost_face = (fc_d < 0.12) & rod_warm & exposed_zone & ~staff_face
-# Only bind vertices whose every incident body face is a ghost shell. A
-# vertex shared with sleeve anatomy must keep its anatomy weights, or the
-# stow collapse drags the sleeve into a black spike fan.
-_body_face = ~staff_face
-_non_ghost = np.bincount(
-    F[_body_face & ~ghost_face].reshape(-1), minlength=len(V)
-)
-_any_ghost = np.bincount(
-    F[ghost_face].reshape(-1), minlength=len(V)
-)
-ghost_verts = (_non_ghost == 0) & (_any_ghost > 0)
-ghost_verts &= y < 1.5 * SCALE  # never steal the crown ornament
-force("staff_hide", ghost_verts)
-log(f"ghost rod verts bound to staff_hide: {ghost_verts.sum()}")
+rod_warm = (face_col[:, 0] - face_col[:, 2]) > 0.15
+absorb = (fc_d < 0.30) & rod_warm & ~staff_face
+staff_face |= absorb
+log(f"staff faces after warm absorb: {staff_face.sum()}")
+
 
 rod_face = staff_face
 for k in range(K):
@@ -660,10 +624,7 @@ for clip_name, keys in [("equip", EQUIP_KEYS), ("stow", STOW_KEYS)]:
     v_acc = v3_acc(vs)
     animations.append({
         "name": clip_name,
-        "channels": [
-            {"sampler": 0, "target": {"node": staff_idx, "path": "scale"}},
-            {"sampler": 0, "target": {"node": BIDX["staff_hide"], "path": "scale"}},
-        ],
+        "channels": [{"sampler": 0, "target": {"node": staff_idx, "path": "scale"}}],
         "samplers": [{"input": t_acc, "interpolation": "LINEAR", "output": v_acc}],
     })
 
