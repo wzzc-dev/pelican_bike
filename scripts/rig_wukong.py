@@ -117,6 +117,7 @@ BONES = [
     ("upper_arm_r", 10, (-0.05, -0.01, 0.02)),
     ("forearm_r", 11, (-0.02, -0.18, 0.0)),
     ("hand_r", 12, (-0.02, -0.16, 0.0)),
+    ("staff_hide", 12, (0.0, 0.0, 0.0)),  # offset patched once tips are known
     ("thigh_l", 1, (0.075, -0.02, 0.0)),
     ("shin_l", 14, (0.0, -0.22, 0.0)),
     ("foot_l", 15, (0.0, -0.18, 0.0)),
@@ -160,6 +161,15 @@ def seg_dist(p, a, b):
 
 # per-vertex distance to every segment
 D = np.stack([seg_dist(V, JPOS[a], JPOS[b]) for a, b in SEGMENTS])  # (S, Nv)
+# The arm chain hangs INSIDE the robe and its proximity would drag torso
+# panels along when the arm swings; only sleeve geometry (outside the body
+# column) may bind to arm bones.
+arm_bones = {"shoulder_l", "upper_arm_l", "forearm_l", "hand_l",
+             "shoulder_r", "upper_arm_r", "forearm_r", "hand_r"}
+for si, (ba, _bb) in enumerate(SEGMENTS):
+    if ba in arm_bones or SEG_CHILD.get(ba) in arm_bones:
+        in_body = (np.abs(V[:, 0]) < 0.26 * SCALE) & (V[:, 1] > 0.55 * SCALE)
+        D[si][in_body] += 0.22 * SCALE
 order = D.argsort(axis=0)
 s0 = order[0]
 s1 = order[1]
@@ -223,6 +233,11 @@ for _iter in range(3):
     if len(pts) >= 3:
         curve = pts
 ROD = curve
+# staff_hide rides at the rod midpoint: buried shells bound to it follow the
+# swinging hand (no split rod) and collapse there on stow
+_sh = next(i for i, b in enumerate(BONES) if b[0] == "staff_hide")
+BONES[_sh] = (_sh_name := "staff_hide", BONES[_sh][1], tuple((RA + RB) / 2 - JPOS["hand_r"]))
+JPOS["staff_hide"] = (RA + RB) / 2
 sdl = _poly_dist(V, ROD)
 staff = sdl < 0.075
 log(f"staff equipment verts: {staff.sum()}")
@@ -340,32 +355,53 @@ face_col = C[F].mean(1)
 # rod shells in the body is unacceptable (they stay on the shoulder while
 # the equipment swings away, so the staff visibly splits in two); a few
 # ribbon faces riding along is harmless.
-staff_face = fc_d < 0.10
+# Keep the equipment a thin tube around the centerline: the rod plus the
+# ribbon wrapped on it live within ~0.12 of the axis, while the chest armor
+# and plumes that TOUCH the rod sit just outside it. Adjacency-based peeling
+# crawls from the rod into any anatomy that touches it (the torso rode the
+# swinging hand and tore apart while walking), so growth is capped to the
+# tube radius instead of following face neighbors.
+staff_face = fc_d < 0.085
 from scipy.spatial import cKDTree as _kdtree
-for _peel in range(10):
+for _peel in range(8):
     eq_pts = V[F[staff_face]].reshape(-1, 3)
     tree = _kdtree(eq_pts)
     dd, _ = tree.query(face_centroid, k=1)
-    grow = (dd < 0.06) & (fc_d < 0.24) & ~staff_face
+    grow = (dd < 0.04) & (fc_d < 0.12) & ~staff_face
     if not grow.any():
         break
     staff_face |= grow
+# No hue-based absorb: the robe's warm front panel sits within 0.30 of the
+# rod line and gets swallowed into the equipment, which then rides the
+# swinging hand and tears the torso apart while walking.
 log(f"staff faces captured: {staff_face.sum()}")
-rod_warm = (face_col[:, 0] - face_col[:, 2]) > 0.15
-absorb = (fc_d < 0.30) & rod_warm & ~staff_face
-staff_face |= absorb
-log(f"staff faces after warm absorb: {staff_face.sum()}")
 
 
 rod_face = staff_face
+# Buried duplicate shells: faces hugging the tube just outside the extracted
+# skin, oriented along it (armor plates and robe panels fail that test).
+# Weights are applied per CORNER here, so sleeve faces sharing a vertex with
+# a shell never inherit the collapse.
+fnormal = N[F].mean(1)
+fnormal /= np.maximum(np.linalg.norm(fnormal, axis=1, keepdims=True), 1e-9)
+axis_dir = (RB - RA) / max(np.linalg.norm(RB - RA), 1e-9)
+tube_parallel = np.abs(fnormal @ axis_dir) < 0.35
+shell_face = (fc_d < 0.13) & (fc_d >= 0.085) & tube_parallel & ~rod_face
+shell_face &= (face_centroid[:, 1] < 1.5 * SCALE)  # never steal the crown
+SHELL_IDX = BIDX["staff_hide"] if "staff_hide" in BIDX else None
+log(f"buried shells bound per-corner: {shell_face.sum()} faces")
 for k in range(K):
     faces = F[(face_lab == k) & ~rod_face]
     if len(faces) == 0:
         continue
     tri_v = V[faces]          # (T,3,3)
     tri_n = N[faces]
-    tri_j = J0[faces]
-    tri_w = W0[faces]
+    tri_j = J0[faces].copy()
+    tri_w = W0[faces].copy()
+    is_shell = shell_face[faces]
+    if is_shell.any():
+        tri_j[is_shell] = SHELL_IDX
+        tri_w[is_shell] = np.array([1.0, 0.0, 0.0, 0.0])
     mm = cluster_material(k)
     p_pos = v3_acc(tri_v.reshape(-1, 3))
     p_nrm = v3_acc(tri_n.reshape(-1, 3))
@@ -624,7 +660,10 @@ for clip_name, keys in [("equip", EQUIP_KEYS), ("stow", STOW_KEYS)]:
     v_acc = v3_acc(vs)
     animations.append({
         "name": clip_name,
-        "channels": [{"sampler": 0, "target": {"node": staff_idx, "path": "scale"}}],
+        "channels": [
+            {"sampler": 0, "target": {"node": staff_idx, "path": "scale"}},
+            {"sampler": 0, "target": {"node": BIDX["staff_hide"], "path": "scale"}},
+        ],
         "samplers": [{"input": t_acc, "interpolation": "LINEAR", "output": v_acc}],
     })
 
