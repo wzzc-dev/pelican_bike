@@ -382,14 +382,13 @@ rod_face = staff_face
 # skin, oriented along it (armor plates and robe panels fail that test).
 # Weights are applied per CORNER here, so sleeve faces sharing a vertex with
 # a shell never inherit the collapse.
-fnormal = N[F].mean(1)
-fnormal /= np.maximum(np.linalg.norm(fnormal, axis=1, keepdims=True), 1e-9)
-axis_dir = (RB - RA) / max(np.linalg.norm(RB - RA), 1e-9)
-tube_parallel = np.abs(fnormal @ axis_dir) < 0.35
-shell_face = (fc_d < 0.13) & (fc_d >= 0.085) & tube_parallel & ~rod_face
-shell_face &= (face_centroid[:, 1] < 1.5 * SCALE)  # never steal the crown
-SHELL_IDX = BIDX["staff_hide"] if "staff_hide" in BIDX else None
-log(f"buried shells bound per-corner: {shell_face.sum()} faces")
+# No shell re-binding: chest/robe faces near the rod pass any geometric
+# test eventually, and dragging them with the arm tears the torso during
+# the attack swing. Buried shells stay anatomy-bound and ride the shoulder,
+# which reads as the wrapping cloth.
+shell_face = np.zeros(len(F), dtype=bool)
+SHELL_IDX = 0
+log("shell re-binding disabled")
 for k in range(K):
     faces = F[(face_lab == k) & ~rod_face]
     if len(faces) == 0:
