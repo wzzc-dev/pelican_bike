@@ -149,7 +149,13 @@ SEG_CHILD = {
     "tail_1": "tail_2", "tail_2": "tail_3",
     "scarf_1": "scarf_2", "scarf_2": "scarf_3",
 }
-SEGMENTS = [(b, SEG_CHILD[b]) for b in SEG_CHILD]
+# Arm bones drive the equipment node (the rod) through the joint chain but
+# deliberately take NO skin weights: the sleeves hide the arms, and proximity
+# binding drags chest/robe panels along when the arm swings, tearing the
+# torso apart mid-attack. The robe stays bound to spine/chest instead.
+ARM_BONES = {"shoulder_l", "upper_arm_l", "forearm_l", "hand_l",
+             "shoulder_r", "upper_arm_r", "forearm_r", "hand_r"}
+SEGMENTS = [(b, SEG_CHILD[b]) for b in SEG_CHILD if b not in ARM_BONES]
 
 
 def seg_dist(p, a, b):
@@ -161,15 +167,7 @@ def seg_dist(p, a, b):
 
 # per-vertex distance to every segment
 D = np.stack([seg_dist(V, JPOS[a], JPOS[b]) for a, b in SEGMENTS])  # (S, Nv)
-# The arm chain hangs INSIDE the robe and its proximity would drag torso
-# panels along when the arm swings; only sleeve geometry (outside the body
-# column) may bind to arm bones.
-arm_bones = {"shoulder_l", "upper_arm_l", "forearm_l", "hand_l",
-             "shoulder_r", "upper_arm_r", "forearm_r", "hand_r"}
-for si, (ba, _bb) in enumerate(SEGMENTS):
-    if ba in arm_bones or SEG_CHILD.get(ba) in arm_bones:
-        in_body = (np.abs(V[:, 0]) < 0.26 * SCALE) & (V[:, 1] > 0.55 * SCALE)
-        D[si][in_body] += 0.22 * SCALE
+
 order = D.argsort(axis=0)
 s0 = order[0]
 s1 = order[1]
@@ -361,13 +359,16 @@ face_col = C[F].mean(1)
 # crawls from the rod into any anatomy that touches it (the torso rode the
 # swinging hand and tore apart while walking), so growth is capped to the
 # tube radius instead of following face neighbors.
-staff_face = fc_d < 0.085
+# Wide tube: with the arm bones unskinned, no amount of rod capture can
+# drag the torso during a swing, so the corridor can swallow every shell
+# layer and the stow leaves no stub behind.
+staff_face = fc_d < 0.16
 from scipy.spatial import cKDTree as _kdtree
-for _peel in range(8):
+for _peel in range(12):
     eq_pts = V[F[staff_face]].reshape(-1, 3)
     tree = _kdtree(eq_pts)
     dd, _ = tree.query(face_centroid, k=1)
-    grow = (dd < 0.04) & (fc_d < 0.12) & ~staff_face
+    grow = (dd < 0.06) & (fc_d < 0.30) & ~staff_face
     if not grow.any():
         break
     staff_face |= grow
