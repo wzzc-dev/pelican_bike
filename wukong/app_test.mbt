@@ -6,10 +6,13 @@ test "wukong scene loads with skeleton, clips and skin" {
   // 24 bones + character root + ground node
   assert_true(scene.nodes().length() >= 26)
   assert_eq(scene.skins().length(), 1)
-  assert_eq(scene.animations().length(), 5)
+  assert_eq(scene.animations().length(), 7)
   let clips = scene.animations()
   let names = clips.map(clip => clip.name())
-  assert_eq(names, ["idle", "walk", "run", "jump", "attack"])
+  assert_eq(
+    names,
+    ["idle", "walk", "run", "jump", "attack", "equip", "stow"],
+  )
   assert_true(clips[1].duration() > 0.0)
   // The character root carries the skin and its mesh has joint weights.
   let root = scene.nodes()[model.character_node]
@@ -47,7 +50,8 @@ test "advance walks the character forward and animates the clip" {
     1.0 / 60.0,
   )
   assert_eq(stepped.state, Walk)
-  assert_true(stepped.pos_z > 0.0)
+  // Camera starts behind +z looking toward -z, so W walks away from it.
+  assert_true(stepped.pos_z < 0.0)
   assert_true(stepped.clip_time > 0.0)
   // The published snapshot must carry a different scene revision each tick.
   let initial = @wukong.Model::new()
@@ -88,12 +92,65 @@ test "run is faster than walk and turning changes facing" {
   let run_model = @wukong.update(walk_model, @wukong.Key("Shift", true))
   let walked = @wukong.advance(walk_model, 0.5)
   let ran = @wukong.advance(run_model, 0.5)
-  assert_true(ran.pos_z > walked.pos_z)
-  let turned = @wukong.advance(
-    @wukong.update(@wukong.Model::new(), @wukong.Key("a", true)),
+  assert_true(ran.pos_z < walked.pos_z)
+  // D strafes toward screen-right (+x) and the heading follows the motion.
+  let strafed = @wukong.advance(
+    @wukong.update(@wukong.Model::new(), @wukong.Key("d", true)),
     0.5,
   )
-  assert_true(turned.facing > 0.0)
+  assert_true(strafed.pos_x > 0.0)
+  assert_true(strafed.facing > 0.0)
+}
+
+///|
+test "E stows the staff and E again re-equips it" {
+  let stowed = @wukong.update(@wukong.Model::new(), @wukong.Key("e", true))
+  assert_eq(stowed.state, Stow)
+  assert_false(stowed.staff_out)
+  let mut current = stowed
+  for _ in 0..<45 {
+    current = @wukong.advance(current, 1.0 / 30.0)
+  }
+  assert_eq(current.state, Idle)
+  let equipped = @wukong.update(current, @wukong.Key("e", true))
+  assert_eq(equipped.state, Equip)
+  assert_true(equipped.staff_out)
+  let mut done = equipped
+  for _ in 0..<45 {
+    done = @wukong.advance(done, 1.0 / 30.0)
+  }
+  assert_eq(done.state, Idle)
+}
+
+///|
+test "left click attacks and a drag does not" {
+  let base = @wukong.Model::new()
+  let down = @wukong.update(
+    base,
+    @wukong.Viewport(@moui_3d.PointerDown(@core.Point::{x: 0.0, y: 0.0})),
+  )
+  assert_eq(down.state, Idle)
+  let moved = @wukong.update(
+    @wukong.update(
+      down,
+      @wukong.Viewport(@moui_3d.PointerMove(@core.Point::{x: 40.0, y: 10.0})),
+    ),
+    @wukong.Viewport(@moui_3d.PointerUp(@core.Point::{x: 40.0, y: 10.0})),
+  )
+  // A 50px drag orbits the camera instead of swinging.
+  assert_eq(moved.state, Idle)
+  assert_true(moved.snapshot.camera().azimuth() != base.snapshot.camera().azimuth())
+  let clicked = @wukong.update(
+    @wukong.update(
+      @wukong.update(
+        base,
+        @wukong.Viewport(@moui_3d.PointerDown(@core.Point::{x: 1.0, y: 1.0})),
+      ),
+      @wukong.Viewport(@moui_3d.PointerMove(@core.Point::{x: 1.5, y: 1.5})),
+    ),
+    @wukong.Viewport(@moui_3d.PointerUp(@core.Point::{x: 1.5, y: 1.5})),
+  )
+  assert_eq(clicked.state, Attack)
 }
 
 ///|

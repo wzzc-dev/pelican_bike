@@ -12,6 +12,8 @@ pub(all) enum WukongState {
   Run
   Jump
   Attack
+  Equip
+  Stow
 } derive(Eq, Debug)
 
 ///|
@@ -26,11 +28,12 @@ let clip_walk : Int32 = 1
 let clip_run : Int32 = 2
 let clip_jump : Int32 = 3
 let clip_attack : Int32 = 4
+let clip_equip : Int32 = 5
+let clip_stow : Int32 = 6
 
 ///|
 let walk_speed : Double = 1.4
 let run_speed : Double = 3.0
-let turn_speed : Double = 2.6
 let jump_velocity : Double = 4.2
 let gravity : Double = 11.0
 
@@ -54,6 +57,12 @@ pub struct Model {
   elapsed : Double
   ticks : Int64
   loaded : Bool
+  dragging : Bool
+  drag_x : Double
+  drag_y : Double
+  drag_moved : Double
+  staff_out : Bool
+  staff_node : Int32
 }
 
 ///|
@@ -105,7 +114,24 @@ pub fn Model::new_with_binding(
     elapsed: 0.0,
     ticks: 0L,
     loaded,
+    dragging: false,
+    drag_x: 0.0,
+    drag_y: 0.0,
+    drag_moved: 0.0,
+    staff_out: true,
+    staff_node: find_staff_node(scene),
   }
+}
+
+///|
+fn find_staff_node(scene : @moui_3d.Scene) -> Int32 {
+  let mut result = -1
+  for index, node in scene.nodes() {
+    if node.name() == "staff_gear" {
+      result = index
+    }
+  }
+  result
 }
 
 ///|
@@ -147,10 +173,18 @@ pub fn update(model : Model, message : Msg) -> Model {
       let model = { ..model, keys, }
       let space = key == " " || key == "Space"
       let strike = key == "j" || key == "J"
+      let toggle = key == "e" || key == "E"
       let can_jump = space && model.state != Jump && model.pos_y <= 0.001
       let can_attack = strike && model.state != Attack
+      let can_toggle = toggle && model.state != Equip && model.state != Stow
       if !pressed {
         model
+      } else if can_toggle {
+        if model.staff_out {
+          { ..model, state: Stow, clip: clip_stow, clip_time: 0.0, staff_out: false }
+        } else {
+          { ..model, state: Equip, clip: clip_equip, clip_time: 0.0, staff_out: true }
+        }
       } else if can_jump {
         {
           ..model,
@@ -172,7 +206,67 @@ pub fn update(model : Model, message : Msg) -> Model {
       }
     }
     Tick(delta) => advance(model, delta)
-    Viewport(_) => model
+    Viewport(event) => match event {
+      @moui_3d.PointerDown(point) => {
+        {
+          ..model,
+          dragging: true,
+          drag_x: point.x,
+          drag_y: point.y,
+          drag_moved: 0.0,
+        }
+      }
+      @moui_3d.PointerMove(point) => {
+        if model.dragging {
+          let dx = point.x - model.drag_x
+          let dy = point.y - model.drag_y
+          let camera = model.snapshot.camera().orbit(dx * -0.008, dy * -0.008)
+          let snapshot = @moui_3d.ViewportSnapshot::new(
+            scene_revision=model.snapshot.scene_revision() + 1L,
+            scene=model.snapshot.scene(),
+            camera~,
+          )
+          ignore(model.binding.publish(snapshot))
+          {
+            ..model,
+            snapshot,
+            drag_x: point.x,
+            drag_y: point.y,
+            drag_moved: model.drag_moved + dx.abs() + dy.abs(),
+          }
+        } else {
+          model
+        }
+      }
+      @moui_3d.PointerUp(_) => {
+        let was_click = model.dragging && model.drag_moved < 6.0
+        let model = { ..model, dragging: false, drag_moved: 0.0 }
+        if was_click && model.state != Attack {
+          {
+            ..model,
+            state: Attack,
+            clip: clip_attack,
+            clip_time: 0.0,
+            attack_time: 0.0,
+          }
+        } else {
+          model
+        }
+      }
+      @moui_3d.Wheel(amount) => {
+        let camera = model.snapshot.camera().zoom(
+          if amount > 0.0 { 1.1 } else { 0.9 },
+        )
+        let snapshot = @moui_3d.ViewportSnapshot::new(
+          scene_revision=model.snapshot.scene_revision() + 1L,
+          scene=model.snapshot.scene(),
+          camera~,
+        )
+        ignore(model.binding.publish(snapshot))
+        { ..model, snapshot, }
+      }
+      _ => model
+    }
   }
 }
 
@@ -186,7 +280,7 @@ pub fn advance(model : Model, delta_input : Double) -> Model {
   let left = model.pressed("a") || model.pressed("A")
   let right = model.pressed("d") || model.pressed("D")
   let sprint = model.pressed("Shift")
-  let moving = forward || back
+  let moving = forward || back || left || right
   // Attack owns the character until its clip finishes; jump ends on landing.
   let (state, clip, clip_time, attack_time) = if model.state == Attack {
     let attack_time = model.attack_time + delta
@@ -194,6 +288,12 @@ pub fn advance(model : Model, delta_input : Double) -> Model {
       (Idle, clip_idle, 0.0, attack_time)
     } else {
       (model.state, model.clip, model.clip_time + delta, attack_time)
+    }
+  } else if model.state == Equip || model.state == Stow {
+    if model.clip_time + delta >= clip_duration(model, model.clip) {
+      (Idle, clip_idle, 0.0, model.attack_time)
+    } else {
+      (model.state, model.clip, model.clip_time + delta, model.attack_time)
     }
   } else if model.state == Jump {
     if model.pos_y <= 0.001 && model.vel_y <= 0.0 {
@@ -214,34 +314,42 @@ pub fn advance(model : Model, delta_input : Double) -> Model {
   } else {
     (model.state, model.clip, model.clip_time + delta, model.attack_time)
   }
-  // Turning and striding are suppressed mid-swing and mid-air.
-  let facing = if state == Attack || state == Jump {
-    model.facing
-  } else {
-    let turn = (if left { 1.0 } else { 0.0 }) - (if right { 1.0 } else { 0.0 })
-    model.facing + turn * turn_speed * delta
-  }
+  // Camera-relative locomotion: W/S advance along the view direction and
+  // A/D strafe; the character faces its heading. Turning is suppressed
+  // mid-swing and mid-air.
   let speed = match state {
     Walk => walk_speed
     Run => run_speed
     _ => 0.0
   }
-  let (pos_x, pos_z) = if speed <= 0.0 || state == Jump {
+  let azimuth = model.snapshot.camera().azimuth()
+  // camera sits at target + radius*(sin az, ., cos az); forward is toward the
+  // target, i.e. (-sin az, -cos az) on the ground plane; right is its perp.
+  let fwd_x = -@math.sin(azimuth)
+  let fwd_z = -@math.cos(azimuth)
+  let right_x = -fwd_z
+  let right_z = fwd_x
+  let axis_x = (if forward { fwd_x } else { 0.0 }) - (if back { fwd_x } else { 0.0 })
+  let axis_z = (if forward { fwd_z } else { 0.0 }) - (if back { fwd_z } else { 0.0 })
+  let strafe_x = (if right { right_x } else { 0.0 }) - (if left { right_x } else { 0.0 })
+  let strafe_z = (if right { right_z } else { 0.0 }) - (if left { right_z } else { 0.0 })
+  let dir_x = axis_x + strafe_x
+  let dir_z = axis_z + strafe_z
+  let dir_len = (dir_x * dir_x + dir_z * dir_z).sqrt()
+  let facing = if state == Attack || state == Jump || state == Equip || state == Stow {
+    model.facing
+  } else if dir_len > 0.0001 {
+    @math.atan2(dir_x, dir_z)
+  } else {
+    model.facing
+  }
+  let (pos_x, pos_z) = if speed <= 0.0 || state == Jump || dir_len <= 0.0001 {
     (model.pos_x, model.pos_z)
   } else {
-    let sin_f = @math.sin(facing)
-    let cos_f = @math.cos(facing)
-    let dx = (if forward { sin_f } else { 0.0 }) - (if back { sin_f } else { 0.0 })
-    let dz = (if forward { cos_f } else { 0.0 }) - (if back { cos_f } else { 0.0 })
-    let length = (dx * dx + dz * dz).sqrt()
-    if length > 0.0001 {
-      (
-        model.pos_x + dx / length * speed * delta,
-        model.pos_z + dz / length * speed * delta,
-      )
-    } else {
-      (model.pos_x, model.pos_z)
-    }
+    (
+      model.pos_x + dir_x / dir_len * speed * delta,
+      model.pos_z + dir_z / dir_len * speed * delta,
+    )
   }
   let (pos_y, vel_y) = if model.pos_y > 0.0 || model.vel_y != 0.0 {
     let pos_y = model.pos_y + model.vel_y * delta
@@ -338,7 +446,22 @@ fn refresh_pose(model : Model) -> Model {
       value=[model.pos_x, model.pos_y, model.pos_z],
     ),
   )
-  let animated = model.base_scene.apply_animation_samples(samples)
+  let animated = if model.clip == clip_equip || model.clip == clip_stow {
+    model.base_scene.apply_animation_samples(samples)
+  } else {
+    // Hold the staff at its stowed/equipped size while no gear clip plays:
+    // scale 0 hides the rod (kept as a needle by the ear), scale 1 shows it.
+    let staff_scale = if model.staff_out { 1.0 } else { 0.0 }
+    let with_staff = samples.copy()
+    with_staff.push(
+      @moui_3d.AnimationSample::new(
+        node=@moui_3d.NodeId::new(model.staff_node),
+        path=@moui_3d.Scale,
+        value=[staff_scale, staff_scale, staff_scale],
+      ),
+    )
+    model.base_scene.apply_animation_samples(with_staff)
+  }
   let camera = model.snapshot.camera().with_target(
     @moui_3d.Vec3::new(x=model.pos_x, y=1.05, z=model.pos_z),
   )
@@ -365,9 +488,11 @@ pub fn view(model : Model) -> @moui.View[Msg] {
     Run => "run"
     Jump => "jump"
     Attack => "attack"
+    Equip => "equip"
+    Stow => "stow"
   }
   let hint = if model.loaded {
-    "WASD move · Shift run · Space jump · J attack · click the scene to capture the keyboard"
+    "WASD move · Shift run · Space jump · click attack · drag look · E equip/stow"
   } else {
     "wukong.gltf failed to load; regenerate with scripts/generate-wukong-gltf.mjs"
   }

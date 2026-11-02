@@ -189,21 +189,43 @@ def force(bone, mask):
     W0[mask, 0] = 1.0
 
 
-# staff: the thin diagonal rod. Detect as vertices far from the body axis
-# in x whose height is mid-to-high and which sit on the fitted line.
-staff_line_a = np.array([-0.41, 0.42, 0.05]) * SCALE
-staff_line_b = np.array([0.31, 0.98, -0.02]) * SCALE
-ab = staff_line_b - staff_line_a
-tt = np.clip(((V - staff_line_a) @ ab) / (ab @ ab), 0, 1)
-dl = np.linalg.norm(V - (staff_line_a + np.outer(tt, ab)), axis=1)
-# the rod protrudes past the sleeve (|x| large, low) and crosses above the
-# shoulder (high); the middle runs along the chest so chest weights win there.
-staff = dl < 0.045 * SCALE
-# keep sleeve/cape bulk out: the rod is thin, so also require it to be off
-# the body column or above the shoulder line
-staff &= (np.abs(x) > 0.14 * SCALE) | (y > 0.70 * SCALE) | (np.abs(x - 0.03) < 0.06 * SCALE)
-force("hand_r", staff)
-log(f"staff override: {staff.sum()} verts")
+# The golden staff is split out of the skinned body into its own equipment
+# mesh parented to the hand_r bone node, so it rides the arm exactly and can
+# be equipped/stowed as a unit. Tip clusters anchor a precise 3D line.
+tip_r = (y > 0.90 * SCALE) & (x > 0.24 * SCALE)
+tip_l = (y > 0.30 * SCALE) & (y < 0.50 * SCALE) & (x < -0.34 * SCALE)
+RA = V[tip_r].mean(0) if tip_r.sum() > 5 else np.array([0.268, 0.917, -0.263]) * SCALE
+RB = V[tip_l].mean(0) if tip_l.sum() > 5 else np.array([-0.368, 0.376, -0.087]) * SCALE
+# The sculpt bends the rod over the shoulder: fit a smooth centerline by
+# binning corridor points along the chord and averaging each bin, iterating
+# three times. A straight fit misses the arc and leaves shells in the body.
+def _seg_dist(P, a, b):
+    ab = b - a
+    tt = np.clip(((P - a) @ ab) / max(float(ab @ ab), 1e-12), 0, 1)
+    return np.linalg.norm(P - (a + np.outer(tt, ab)), axis=1)
+def _poly_dist(P, pts):
+    best = np.full(len(P), 1e9)
+    for a, b in zip(pts[:-1], pts[1:]):
+        best = np.minimum(best, _seg_dist(P, a, b))
+    return best
+chord = RB - RA
+chord_len = float(np.linalg.norm(chord))
+proj = ((V - RA) @ chord) / max(chord_len * chord_len, 1e-12)
+curve = [RA, RB]
+for _iter in range(3):
+    near = _poly_dist(V, curve) < 0.10
+    bins = np.linspace(-0.08, 1.08, 13)
+    pts = []
+    for lo, hi in zip(bins[:-1], bins[1:]):
+        sel = near & (proj >= lo) & (proj < hi)
+        if sel.sum() >= 10:
+            pts.append(V[sel].mean(0))
+    if len(pts) >= 3:
+        curve = pts
+ROD = curve
+sdl = _poly_dist(V, ROD)
+staff = sdl < 0.075
+log(f"staff equipment verts: {staff.sum()}")
 
 # plumes + crown: everything above the head bone joint that is thin/high
 force("head", (y > 0.98 * SCALE) & ~staff)
@@ -227,6 +249,12 @@ W0 = np.clip(W0, 0, 1)
 W0[:, 0] = np.where(W0.sum(1) <= 0, 1.0, W0[:, 0])
 W0 /= W0.sum(1, keepdims=True)
 log("weights normalized")
+
+# ------------------------------------------------------- staff gear ----
+# The rod rides on the hand_r bone as an equipment node (child of the bone,
+# non-skinned), so every arm pose carries the whole staff rigidly and the
+# equip/stow clips can scale it in and out (如意金箍棒 shrinks to a needle).
+hand_world = JPOS["hand_r"]
 
 # ---------------------------------------------------------- glTF emit ----
 chunks = []
@@ -286,8 +314,40 @@ face_cluster = np.stack([CL[F[:, 0]], CL[F[:, 1]], CL[F[:, 2]]], axis=1)
 face_lab = np.apply_along_axis(lambda r: np.bincount(r, minlength=K).argmax(), 1, face_cluster)
 prims = []
 materials = []
+
+# Face-level staff mask: centroid inside the bent corridor, then dilate
+# across face adjacency so the sculpt's duplicated shell layers join the
+# equipment instead of ghosting in the body when the rod shrinks away.
+face_centroid = V[F].mean(1)
+fc_d = _poly_dist(face_centroid, ROD)
+face_col = C[F].mean(1)
+# Take every face inside the corridor: the sculpt paints the rod in gold,
+# cream, dark red and specular highlights, so no color rule captures it
+# completely, and the rod is built from duplicated shells (the mesh has
+# thousands of disconnected fragments), so a tight corridor leaves ghost
+# layers behind. Sleeve faces caught by the wider corridor ride the hand
+# bone anyway, which is where the arm wants them.
+# The sculpt stacks several rod shells around the axis, so a tight corridor
+# leaves ghosts behind. Take a wide tube wherever the rod is exposed beyond
+# the torso silhouette (those shells are the visible rod) and a tight one
+# through the body (the rod is occluded there and neighbors are anatomy).
+# Corridor around the fitted centerline, then peel duplicate shells that sit
+# one spacing away; the sleeve wrapping the rod is farther out and survives.
+staff_face = fc_d < 0.13
+from scipy.spatial import cKDTree as _kdtree
+for _peel in range(10):
+    eq_pts = V[F[staff_face]].reshape(-1, 3)
+    tree = _kdtree(eq_pts)
+    dd, _ = tree.query(face_centroid, k=1)
+    grow = (dd < 0.06) & (fc_d < 0.24) & ~staff_face
+    if not grow.any():
+        break
+    staff_face |= grow
+log(f"staff faces captured: {staff_face.sum()}")
+
+rod_face = staff_face
 for k in range(K):
-    faces = F[face_lab == k]
+    faces = F[(face_lab == k) & ~rod_face]
     if len(faces) == 0:
         continue
     tri_v = V[faces]          # (T,3,3)
@@ -312,6 +372,33 @@ for k in range(K):
                                  "JOINTS_0": p_jnt, "WEIGHTS_0": p_wgt},
                   "material": len(materials) - 1, "mode": 4})
 log(f"geometry emitted: {len(prims)} primitives, {int(face_lab.shape[0])} faces")
+
+# staff equipment mesh: geometry in the hand_r bone's local frame
+staff_prims = []
+staff_faces = F[staff_face]
+staff_face_lab = face_lab[staff_face]
+VS = V - hand_world  # hand_r rest offset == its world translation (no rotation)
+for k in range(K):
+    faces = staff_faces[staff_face_lab == k]
+    if len(faces) == 0:
+        continue
+    tri_v = VS[faces]
+    tri_n = N[faces]
+    mm = cluster_material(k)
+    p_pos = v3_acc(tri_v.reshape(-1, 3))
+    p_nrm = v3_acc(tri_n.reshape(-1, 3))
+    materials.append({
+        "name": f"staff{k}",
+        "doubleSided": True,
+        "pbrMetallicRoughness": {
+            "baseColorFactor": [float(cent[k][0]), float(cent[k][1]), float(cent[k][2]), 1.0],
+            "metallicFactor": mm["m"],
+            "roughnessFactor": mm["r"],
+        },
+    })
+    staff_prims.append({"attributes": {"POSITION": p_pos, "NORMAL": p_nrm},
+                        "material": len(materials) - 1, "mode": 4})
+log(f"staff mesh: {len(staff_prims)} prims, {len(staff_faces)} faces")
 
 # ground quad (unskinned)
 gq = 12.0
@@ -463,6 +550,20 @@ clip("attack", [
                         (.6, [HIP_REST[0], HIP_REST[1], HIP_REST[2] + .02]), (.9, HIP_REST)]),
 ])
 
+def scale_chan(node_index, keys):
+    ts = np.array([[t] for t, _ in keys], dtype=np.float64)
+    vs = np.array([v for _, v in keys])
+    t_acc = acc(add_view(f32(ts), 34962), 5126, len(ts), "SCALAR")
+    v_acc = v3_acc(vs)
+    return {"node": node_index, "path": "translation", "input": t_acc, "output": v_acc}
+
+
+# equip/stow are emitted after nodes exist (see assemble); stash keyframes.
+EQUIP_KEYS = [(0.0, [0.0, 0.0, 0.0]), (0.12, [0.16, 0.16, 0.16]),
+              (0.30, [1.0, 1.0, 1.0]), (0.55, [1.0, 1.0, 1.0])]
+STOW_KEYS = [(0.0, [1.0, 1.0, 1.0]), (0.25, [1.0, 1.0, 1.0]),
+             (0.42, [0.16, 0.16, 0.16]), (0.55, [0.0, 0.0, 0.0])]
+
 # ------------------------------------------------------------- assemble ----
 nodes = []
 for i, (name, parent, off) in enumerate(BONES):
@@ -471,10 +572,13 @@ for i, (name, parent, off) in enumerate(BONES):
     if kids:
         node["children"] = kids
     nodes.append(node)
+staff_idx = len(nodes)
+nodes.append({"name": "staff_gear", "mesh": 1})
+nodes[BIDX["hand_r"]]["children"] = nodes[BIDX["hand_r"]].get("children", []) + [staff_idx]
 char_idx = len(nodes)
 nodes.append({"name": "wukong", "mesh": 0, "skin": 0, "children": [0]})
 ground_idx = len(nodes)
-nodes.append({"name": "ground", "mesh": 1})
+nodes.append({"name": "ground", "mesh": 2})
 
 # inverse bind matrices: world rest transforms are pure translations
 inv_bind = []
@@ -494,9 +598,22 @@ for c in clips:
     chans, samps = [], []
     for ch in c["channels"]:
         samps.append({"input": ch["input"], "interpolation": "LINEAR", "output": ch["output"]})
+        node_index = staff_idx if ch["bone"] == "__staff__" else BIDX[ch["bone"]]
         chans.append({"sampler": len(samps) - 1,
-                      "target": {"node": BIDX[ch["bone"]], "path": ch["path"]}})
+                      "target": {"node": node_index, "path": ch["path"]}})
     animations.append({"name": c["name"], "channels": chans, "samplers": samps})
+
+# equip / stow: staff node scale in and out (the rod shrinks to a needle)
+for clip_name, keys in [("equip", EQUIP_KEYS), ("stow", STOW_KEYS)]:
+    ts = np.array([[t] for t, _ in keys], dtype=np.float64)
+    vs = np.array([v for _, v in keys])
+    t_acc = acc(add_view(f32(ts), 34962), 5126, len(ts), "SCALAR")
+    v_acc = v3_acc(vs)
+    animations.append({
+        "name": clip_name,
+        "channels": [{"sampler": 0, "target": {"node": staff_idx, "path": "scale"}}],
+        "samplers": [{"input": t_acc, "interpolation": "LINEAR", "output": v_acc}],
+    })
 
 buffer = b"".join(chunks)
 doc = {
@@ -507,6 +624,7 @@ doc = {
     "skins": [{"name": "wukong_skin", "joints": list(range(len(BONES))), "skeleton": 0,
                "inverseBindMatrices": ib_acc}],
     "meshes": [{"name": "wukong_body", "primitives": prims},
+               {"name": "staff", "primitives": staff_prims},
                {"name": "ground", "primitives": [ground_prim]}],
     "materials": materials,
     "animations": animations,

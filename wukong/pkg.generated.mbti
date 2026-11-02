@@ -43,6 +43,12 @@ pub struct Model {
   elapsed : Double
   ticks : Int64
   loaded : Bool
+  dragging : Bool
+  drag_x : Double
+  drag_y : Double
+  drag_moved : Double
+  staff_out : Bool
+  staff_node : Int32
 }
 pub fn Model::new() -> Self
 pub fn Model::new_with_binding(@moui_3d.ThreeDViewportBinding) -> Self
@@ -60,6 +66,8 @@ pub(all) enum WukongState {
   Run
   Jump
   Attack
+  Equip
+  Stow
 } derive(Eq, @debug.Debug)
 pub fn WukongState::equal(Self, Self) -> Bool
 pub fn WukongState::not_equal(Self, Self) -> Bool
